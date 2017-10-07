@@ -1,9 +1,12 @@
 # Change Detection test on a stream of Graphs (CDG) #
 
 Author: *Daniele Zambon*, 
+
 Affiliation: *Università della Svizzera italiana* 
+
 eMail: `daniele.zambon@usi.ch` 
-Last Update: *27/09/2017* 
+
+Last Update: *05/10/2017* 
 
 
 ## Please cite 
@@ -72,7 +75,7 @@ You will need the following python3 packages:
 
 Other required packages are:
 
-* graph edit distance: `GraphMatchingToolkit` [3]. 
+* graph edit distance: `GraphMatchingToolkit` [3] (available here [graph-matching-toolkit](https://github.com/dan-zam/graph-matching-toolkit)).
 * graph visualisation: `graphviz` [4].
 
 
