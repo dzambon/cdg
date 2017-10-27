@@ -22,7 +22,7 @@ Please consider citing our following paper [1,2].
   title={Detecting Changes in Sequences of Attributed Graphs},
   author={Zambon, Daniele and Livi, Lorenzo and Alippi, Cesare},
   booktitle={IEEE Symposium Series on Computational Intelligence},
-  year={2017}
+  year={2017},
   organization={IEEE}
 }
 ```

@@ -208,9 +208,6 @@ class Simulation():
         :return:
         """
 
-        orrible_trick_for_plots = False
-
-
         # # Auxiliar variables
 
         # variables for run lengths
@@ -282,8 +279,7 @@ class Simulation():
                     else:
                         runLen1.append(cusum.time)
 
-                if not orrible_trick_for_plots  :
-                    cusum.reset()
+                cusum.reset()
 
             # # Time update
 
@@ -291,7 +287,6 @@ class Simulation():
             ctTime += self.pars.winSize
             if ctTime >= self.pars.testNominal_t + self.pars.testNonnominal_t:
                 break
-
 
         return runLen0, runLen1
 

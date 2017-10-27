@@ -31,7 +31,7 @@
 # Author: Daniele Zambon 
 # Affiliation: Università della Svizzera italiana
 # eMail: daniele.zambon@usi.ch
-# Last Update: 17/09/2017
+# Last Update: 27/10/2017
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 import xml.etree.ElementTree as et
@@ -727,7 +727,7 @@ class Delaunay(Database):
 
         propertyDict['numOfNodeAttr'] = 1
         propertyDict['nodeAttr0'] = 'weight'
-        propertyDict['nodeCostType0'] = 'dzRealVector'
+        propertyDict['nodeCostType0'] = 'csvDouble'
         propertyDict['nodeAttr0Importance'] = 1.0
 
         propertyDict['multiplyNodeCosts'] = 0
@@ -736,9 +736,6 @@ class Delaunay(Database):
         propertyDict['undirected'] = 1
 
         propertyDict['numOfEdgeAttr'] = 0
-        # propertyDict['edgeAttr0'] = 'weight'
-        # propertyDict['edgeCostType0'] = 'dzRealVector'
-        # propertyDict['edgeAttr0Importance'] = 1.0
 
         propertyDict['multiplyEdgeCosts'] = 0
         propertyDict['pEdge'] = 1
