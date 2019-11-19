@@ -1,132 +1,17 @@
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# --------------------------------------------------------------------------------
+# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
 #
-# Description:
-# ---------
-# CUSUM-based change detection tests.
-#
-#
-# References:
-# ---------
-# [tnnls17]
-#   Zambon, Daniele, Cesare Alippi, and Lorenzo Livi.
-#   Concept Drift and Anomaly Detection in Graph Streams.
-#   IEEE Transactions on Neural Networks and Learning Systems (2018).
-#
-#
-# ------------------------------------------------------------------------------
-# Copyright (c) 2017-2018, Daniele Zambon
-# All rights reserved.
-# Licence: BSD-3-Clause
-# ------------------------------------------------------------------------------
-# Author: Daniele Zambon 
-# Affiliation: Università della Svizzera italiana
-# eMail: daniele.zambon@usi.ch
-# Last Update: 04/05/2018
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
+# Implements several change-detection tests based on the cumulative sum chart.
+# --------------------------------------------------------------------------------
 import numpy as np
 import scipy
 import scipy.stats
 import scipy.spatial.distance
-from tqdm import tqdm
-import cdg.util.logger
-import cdg.util.errors
-import cdg.embedding.manifold
 
+import cdg.utils
+import cdg.embedding
+from cdg.changedetection import Cusum, WindowedAndMultivariateCusum
 
-def cusum_alarm_curve(cusum, sequence, y_true, arl=None, **kwargs):
-    """
-
-    :param cusum: Cusum instance to run
-    :param sequence: sequence of statistics
-    :param y_true: ground-truth labels
-    :param arl: (None) if not None, the procedure stops once the a specific arl is reached
-    :param kwargs:
-        - verbose: verbosely print info to stdout
-    :return:
-        - alarm_curve: which is a list of triples
-                [..., (false_alarms, true_alarms, threshold). ...]
-            with `false_alarms` and `true_alarms` obtained with `threshold`
-            If arl is not None, only the corresponding triple is returned.
-    """
-    if arl is None:
-        max_false_alarms = np.inf
-    else:
-        if np.any(y_true):
-            raise ValueError('specific arl = {} can be computed only with '
-                             'a sequence entirely in nominal regime.')
-        else:
-            max_false_alarms = 1. * sequence.shape[0] / arl
-
-    alarm_curve = []
-    false_alarms = 0
-    true_alarms = 0
-    threshold = None  # Start with infinite threshold bc/ Cusum checks for >=
-    max_g = np.array([np.inf])
-
-    verbose = kwargs.pop('verbose', False)
-    pbar = tqdm(leave=True, total=y_true.shape[0], disable=not verbose)
-    while false_alarms < max_false_alarms \
-            and max_g > 0 \
-            and max_g != threshold:
-        threshold = max_g
-        cusum.reset()
-        cusum.threshold = threshold
-        y_pred, g = cusum.predict(sequence, reset=True)
-        true_alarms = np.sum(np.logical_and(y_pred, y_true))
-        false_alarms = np.sum(y_pred) - true_alarms
-        alarm_curve.append((false_alarms, true_alarms, threshold[0]))
-        max_g = max(g)
-
-        pbar.update()
-    pbar.close()
-
-    if arl is None:
-        return alarm_curve
-    else:
-        return alarm_curve[-1:]
-
-def cusum_arl0_curve(cusum, sequence, arl=None, **kwargs):
-    """
-
-    :param cusum: Cusum instance to run
-    :param sequence: sequence of statistics
-    :param y_true: ground-truth labels
-    :param arl: (None) if not None, the procedure stops once the a specific arl is reached
-    :param kwargs:
-        - verbose: verbosely print info to stdout
-    :return:
-        - arl0_curve: which is a list of triples
-                [..., (average_run_length, threshold). ...] with `average_run_length`
-            obtained with `threshold`
-            If arl is not None, only the corresponding triple is returned.
-
-    """
-    no_datapoints = sequence.shape[0]
-    y_true = np.full(no_datapoints, False)
-    alarm_curve = cusum_alarm_curve(cusum=cusum, sequence=sequence,
-                                    y_true=y_true, arl=arl, **kwargs)
-    arl0_curve = []
-    arl_previous = -1
-    for ac in alarm_curve:
-        if ac[0] > 0:
-            arl_current = int(1.*no_datapoints/ac[0])
-            if arl_current != arl_previous:
-                arl0_curve.append((arl_current, ac[-1]))
-            arl_previous = arl_current
-
-    return arl0_curve
-
-def _save_arl0_curve(arl0_curve, beta, dof):
-
-    inc = [1] * 10 + [10] * 19 + [100] * 9
-    runlengths = [sum(inc[:i]) for i in range(1, len(inc))]
-
-    small_list = []
-    for ac in arl0_curve:
-        if ac[0] in runlengths:
-            small_list.append(ac)
-    print( '...[({},{})] = {}'.format(beta, dof, small_list))
 
 _gaussian_cusum_thresholds = {}
 # _gaussian_cusum_thres[(beta, dof)]=[(arl0, threshold), (arl0, threshold), ...]
@@ -142,253 +27,7 @@ _gaussian_cusum_thresholds[(0.75,10)] = [(1000, 26.455656992042748), (800, 25.04
 _gaussian_cusum_thresholds[(0.75,13)] = [(1000, 28.296360157359082), (800, 27.900281004676145), (500, 25.040144045846738), (400, 23.40371863403911), (200, 19.265145772217437), (190, 19.037670743130207), (180, 18.697548278960994), (170, 18.365886902804647), (160, 17.962153821555248), (150, 17.506475769936873), (140, 17.221704134955544), (130, 16.853655843986765), (120, 16.36560308125896), (110, 15.920911695324339), (100, 15.302897248322672), (90, 14.88305375800052), (80, 14.126384892435395), (70, 13.395868749927127), (60, 12.554408085228095), (50, 11.678338542139807), (40, 10.84058787312995), (30, 9.458138395587014), (20, 7.637662358216353), (10, 4.687179769448035), (9, 4.248599356243199), (8, 3.7305468994269706), (7, 3.214606179402425), (6, 2.624132297678605), (5, 1.8636912875878533), (4, 1.040197659069582), (3, 0.001800224762828151)]
 _gaussian_cusum_thresholds[(0.75,15)] = [(1000, 30.512615098830874), (800, 28.75997470953908), (500, 26.31547443115484), (400, 24.60025216120133), (200, 20.349352600754386), (190, 20.16792859599866), (180, 19.54203865135308), (170, 19.129653540623547), (160, 18.732660989324174), (150, 18.509961331914592), (140, 18.091855102781057), (130, 17.619710557561675), (120, 17.20395448041212), (110, 16.7450340605394), (100, 16.305806322137148), (90, 15.699605665619671), (80, 15.109789223150536), (70, 14.37701160363509), (60, 13.417301095503763), (50, 12.34428564693405), (40, 11.262688802902275), (30, 9.804500477867368), (20, 8.066833766582523), (10, 4.914186494563435), (9, 4.4984053517947835), (8, 3.9425571704701348), (7, 3.394313860557155), (6, 2.7064630439303663), (5, 2.000714920728253), (4, 1.1202726158170222), (3, 0.016148104397441188)]
 
-class Cusum(cdg.util.logger.Loggable):
-    """
-    Super class implementing the basis of the change detection tests introduced
-    in [tnnls17].  Despite the name `Cusum`, this is not the classical version, rather
-    it's only based on the cumulative sum chart.
-    """
 
-    def __init__(self, arl=np.inf, beta=.75):
-        """
-        :param arl: target Average Run Length to be reproduced by the threshold.
-            Default is np.inf.
-        :param beta: sensitivity parameter in interval (0,1).
-        """
-        super().__init__()
-        self.gamma = 0
-        self.time = 0
-        self.g = 0
-        self.arl = arl
-        self.threshold = None
-        self.sample_dim = None
-        self.beta = beta
-        self.log.debug("Cusum created")
-
-    def fit(self, x, estimate_threshold=False, **kwargs):
-        """
-        :param x: (no_train, d) training data.
-        :param estimate_threshold: whether or not to estimate the threshold.
-            Default is False.
-        :return: True if the procedure completed as expected, False otherwise
-        """
-        if not isinstance(x, np.ndarray) or x.ndim != 2:
-            raise TypeError('x has to be (no_train, d) numpy array')
-        self.sample_dim = x.shape[1]
-        # gamma
-        res1 = self._estimate_gamma(x)
-        # estimate threshold
-        res2 = True
-        if estimate_threshold is True:
-            res2 = self._estimate_threshold(x=x, **kwargs)
-        # clean
-        self.reset()
-        return res1 and res2
-
-    def _estimate_gamma(self, x, gamma_type='quantile'):
-        if gamma_type == "quantile":
-            gamma = scipy.percentile(x, int(self.beta * 100))
-            res = True
-        elif gamma_type == "std":
-            gamma = np.mean(x) + self.beta * np.std(x)
-            res = True
-        else:
-            raise ValueError(
-                'gamma_type <{}> not available.'.format(str(gamma_type)))
-        self.gamma = gamma
-        return res
-
-    def _estimate_threshold(self, x, **kwargs):
-        """
-
-        :param x:
-        :param kwargs:
-            - precompute_thresholds: this is only works for precomputing the
-                thresholds to be stored (hardcoded) for speed up future runs.
-            - dof: if precompute_thresholds is true, this is required. It is the
-                number of degrees of freedom.
-        :return:
-        """
-        if x.ndim > 1 and x.shape[1] != 1:
-            raise ValueError(
-                'I can\'t run this on data with shape {}.'.format(x.shape))
-
-        precompute_thresholds = kwargs.pop('precompute_thresholds', False)
-        if precompute_thresholds:
-            dof = kwargs.pop('dof', None)
-            if dof is None:
-                raise ValueError('you didnt provide the number of dof')
-            self.log.info('computing arl0 curve; this may take a while.')
-            arl0_curve = cusum_arl0_curve(self, sequence=x, arl=self.arl, **kwargs)
-            _save_arl0_curve(arl0_curve, beta=self.beta, dof=dof)
-            return True
-
-        self.log.info('computing arl0 curve; this may take a while.')
-        arl0_curve = cusum_arl0_curve(self, sequence=x, arl=self.arl, **kwargs)
-
-        threshold = arl0_curve[0][-1]
-        if threshold == 0:
-            self.threshold = np.inf
-            g, _ = self.predict(x)
-            th_current = max(g)
-            self.log.warn("th_current = {}. Is the training set too small?".format(str(th_current)))
-            res = False
-        elif threshold == np.inf or threshold is None:
-            self._estimate_threshold(x, **kwargs)
-            raise cdg.util.errors.CDGImpossible("current threshold = {}".format(str(threshold)))
-        else:
-            res = True
-
-        self.threshold = threshold
-
-        return res
-
-    def reset(self, time=0, g=0):
-        self.time = time
-        self.g = g
-
-    def iterate(self, datapoint, reset=False):
-        """
-        Iterates the change detection test of one step.
-        The current implementation deals only with scalar datapoints.
-
-        :param datapoint: the scalar datum (a statistic) measured at the current
-            time. If a np.array is passed it considers only the first component.
-        :param reset: flag, whether to reset the accumulator every time an alarm
-            is raised.
-        :return alarm: `True` if an alarm is raised, `False` otherwise,
-        :return increment: the new increment for cumulative sum.
-        """
-
-        if isinstance(datapoint, np.ndarray):
-            if datapoint.ndim == 1:
-                measured_statistic = datapoint[0]
-            else:
-                measured_statistic = datapoint[0, 0]
-        else:
-            measured_statistic = datapoint
-
-        # increment time
-        self.time += 1
-
-        # update g
-        increment = measured_statistic - self.gamma
-        self.g += increment
-        if self.g < 0:
-            self.g = 0
-
-        # check if reached the threshold
-        if self.g >= self.threshold:
-            alarm = True
-            if reset:
-                self.reset()
-        else:
-            alarm = False
-
-        # return the increment
-        return alarm, increment
-
-    def predict(self, x, reset=True, verbose=False):
-        """
-        Runs method `Cusum.iterate` for the entire testing phase.
-
-        :param x: (no_test, ) test data (ideally, the stream of data).
-        :param reset: flag, whether to reset the accumulator every time an alarm
-            is raised.
-        :param verbose: if True the progress bar is printed
-        :return y_predict: (no_test, ) array of predictions: True if alarm.
-        :return cumulative_sums: (no_test, ) array g(t).
-        :return num_alarms: number of alarms found
-        """
-        g = []
-        num_alarms = 0
-        self.reset()
-        alarms = []
-        for i in tqdm(range(x.shape[0]), disable=not verbose):
-            alarm_tmp, _ = self.iterate(datapoint=x[i], reset=reset)
-            if alarm_tmp:
-                num_alarms += 1
-            alarms.append(alarm_tmp)
-            g.append(self.g)
-
-        y_predict = np.array(alarms)[:, None]
-        cumulative_sums = np.array(g)[:, None]
-
-        return y_predict, cumulative_sums
-
-
-class WindowedAndMultivariateCusum(Cusum):
-    """
-    Ideally an abstract class extending `Cusum` to deal with data stream
-    that has to be windowed.  It deals also with multivariate data.
-
-    The user passes a sequence
-        x[0],  x[1],  x[2],  ..., x[n],  ...
-    and the current mechanism applies a change detection test on a second
-    sequence
-        x'[0], x'[1], x'[2], ..., x'[w], ...
-    where
-        - x'[w] = stat( x[ w*win_size : (w+1)*winw_size] )
-        - `win_size` is the width of the window
-        - `stat(.)` is any statistic of the window, e.g., the mean.
-
-    Regarding multivariate streams, method `compute_local_statistic` is
-    supposed to return a scalar quantity, in fact, `Cusum` works on a scalar
-    stream.
-    """
-
-    def __init__(self, arl=100, window_size=1, beta=.75):
-        self.window_size = window_size
-        super().__init__(arl=arl, beta=beta)
-
-    def predict(self, x, reset=True, verbose=False):
-        """
-        The same algorithm of the super-method, but splitting the testing data
-        `x` into windows of size `self.window_size`.
-        """
-        g = []
-        num_alarms = 0
-        self.reset()
-        alarms = []
-        for w in tqdm(range(x.shape[0] // self.window_size), disable=not verbose):
-            alarm_tmp, _ = self.iterate(
-                datapoint=x[w * self.window_size:(w + 1) * self.window_size],
-                reset=reset)
-            if alarm_tmp:
-                num_alarms += 1
-            for i in range(self.window_size):
-                alarms.append(alarm_tmp)
-                g.append(self.g)
-
-        y_predict = np.array(alarms)[:, None]
-        cumulative_sums = np.array(g)
-        if cumulative_sums.ndim == 1:
-            cumulative_sums = cumulative_sums[:, None]
-
-        return y_predict, cumulative_sums
-
-    def compute_local_statistic(self, datapoint):
-        """
-        Takes a vector datapoint and return a scalar statistic of it.
-
-        :param datapoint: (d,)
-        :return: a scalar statistic
-        """
-        raise cdg.util.errors.CDGAbstractMethod()
-
-    def iterate(self, datapoint, reset=False):
-        """
-        Deals with a window of data, computes the mean and the distance from the
-        expectation of the gaussian process, rescales the quantity to be
-        comply with a \chi^2(d) distribution
-
-        :param datapoint: (window_size, d) data points.
-        :param reset: flag, whether to reset the accumulator every time an alarm
-            is raised.
-        :return:
-        """
-        val = self.compute_local_statistic(datapoint)
-        return super().iterate(datapoint=val, reset=reset)
 
 
 class GaussianCusum(WindowedAndMultivariateCusum):
@@ -398,13 +37,17 @@ class GaussianCusum(WindowedAndMultivariateCusum):
     distances between the expectation of the Gaussian process and the observed
     vector.
     The `GaussianCusum` funded on the fact that the squared Mahalanobis distance
-    is (proportional to) a \chi^2(d) distribution [tnnls17].
+    is (proportional to) a chi^2(d) distribution.
 
     When the stream is windowed, it considers a stream of mean vectors (computed
     within each window). In this way, assuming sufficiently large window size,
     even when the original process is not Gaussian, the stream of sample means
     can be assumed to be a Gaussian one by the central limit theorem. Please
-    refer to [tnnls17] for more details.
+    refer to 
+        Concept Drift and Anomaly Detection in Graph Streams
+        Daniele Zambon, Cesare Alippi and Lorenzo Livi
+        IEEE Transactions on Neural Networks and Learning Systems, 2018.
+    for more details.
 
     Here, we assume that the covariance matrix doesn't change in swapping to a
     new distribution of the data.
@@ -412,16 +55,16 @@ class GaussianCusum(WindowedAndMultivariateCusum):
 
     def __init__(self, arl=100, window_size=1, beta=.75):
         super().__init__(arl=arl, window_size=window_size, beta=beta)
-        self.training_sample_size = None
-        self.mu_0 = None
-        self.s2_0inv = None
-        self.chi2dist = None
+        self._training_sample_size = None
+        self._mu_0 = None
+        self._s2_0inv = None
+        self._chi2dist = None
 
-    def fit(self, x, estimate_threshold=False, **kwargs):
+    def fit(self, x, estimate_threshold=True, **kwargs):
         """
         :param x: (no_train, d) training data.
         :param estimate_threshold: whether or not to estimate the threshold.
-            Default is False.
+            Default is True.
         Optional parameters are the following:
             - mean: (d,) numpy array with the known expectation of the Gaussian
                 process
@@ -432,73 +75,90 @@ class GaussianCusum(WindowedAndMultivariateCusum):
                 neglected)
             - verbose: passed
             - precompute_thresholds: passed
+            - gamma_type: {'quantile', 'std', 'data'}
+            - threshold_type: {'numerical', 'data'}
         :return: True if the procedure completed as expected, False otherwise
         """
 
         if x is None:
-            self.training_sample_size = 1
+            self._training_sample_size = 1
         else:
-            self.training_sample_size = x.shape[0]
+            self._training_sample_size = x.shape[0]
 
-        self.mu_0 = kwargs.pop('mean', None)
-        if self.mu_0 is None:
-            self.mu_0 = np.mean(x, axis=0)
+        self._mu_0 = kwargs.pop('mean', None)
+        if self._mu_0 is None:
+            self._mu_0 = np.mean(x, axis=0)
 
-        self.s2_0inv = kwargs.pop('inv_cov', None)
-        if self.s2_0inv is None:
+        self._s2_0inv = kwargs.pop('inv_cov', None)
+        if self._s2_0inv is None:
             s2_0 = kwargs.pop('cov', None)
             if s2_0 is None:
                 s2_0 = np.cov(x.transpose())  # this is the unbiased version
             if s2_0.ndim == 0:
-                self.s2_0inv = 1. / s2_0
+                self._s2_0inv = 1. / s2_0
             else:
-                self.s2_0inv = np.linalg.inv(s2_0)
+                self._s2_0inv = np.linalg.inv(s2_0)
 
         self.sample_dim = x.shape[1]
-        self.chi2dist = scipy.stats.chi2(df=self.sample_dim)
+        self._chi2dist = scipy.stats.chi2(df=self.sample_dim)
 
         res = super().fit(x=x, estimate_threshold=estimate_threshold, **kwargs)
 
         return res
-
-    def _estimate_gamma(self, x, gamma_type='quantile'):
+    
+    def _estimate_gamma(self, x, gamma_type='quantile', **kwargs):
         """
         Differently from its superclass method, gamma is taken by the
-        the \chi^2(d) distribution with d degrees of freedom.
+        the chi^2(d) distribution with d degrees of freedom.
+
+        :param x: (no_train, d) training data.
+        :param gamma_type: {'quantile', 'std', 'data'}
         """
+        if gamma_type == "data":
+            return super()._estimate_gamma(x, gamma_type='quantile')
+
+        res = True
         if gamma_type == "quantile":
-            gamma = self.chi2dist.ppf(self.beta)
-            res = True
+            gamma = self._chi2dist.ppf(self.beta)
         elif gamma_type == "std":
-            gamma = self.chi2dist.mean() + self.beta * self.chi2dist.std()
-            res = True
+            gamma = self._chi2dist.mean() + self.beta * self._chi2dist.std()
         else:
+            res = False
             raise ValueError(
                 'gamma_type <{}> not available.'.format(str(gamma_type)))
         self.gamma = gamma
         return res
 
-    def _estimate_threshold(self, **kwargs):
+    def _estimate_threshold(self, x=None, threshold_type='numerical', **kwargs):
         """
         Differently from its superclass method, instead of estimating the
         threshold on a training set, it numerically computes it by running the
-        super-method `_estimate_threshold` on a \chi^2(d) simulated process.
+        super-method `_estimate_threshold` on a chi^2(d) simulated process.
 
-        :param kwargs: needs the required argument
-            - len_simulation: length of the simulated \chi^2(d) process
+        :param x: used only when threshold_type is 'data'
+        :param threshold_type: {'numerical', 'data'} with `data` the threshold is estimated
+            in a non-parameteric way, otherwise a gaussian is assumed
+        :param kwargs: needs the required argument for 'numerical' threshold_type
+            - len_simulation: length of the simulated chi^2(d) process
             - recompute_threshold: (False)
         :return: True/False
         """
-        recompute_threshold = kwargs.pop('recompute_threshold', False)
+
+        if threshold_type == "data":
+            return super()._estimate_threshold(x)
+        
         # if threshold is in table, then use it.
-        current_setting = (self.beta, self.chi2dist.kwds['df'])
+        current_setting = (self.beta, self._chi2dist.kwds['df'])
         threshold = None
         res = False
+        # Whether to recompute thresholds
+        recompute_threshold = kwargs.pop('recompute_threshold', False)
         if not recompute_threshold and current_setting in _gaussian_cusum_thresholds.keys():
             for e in _gaussian_cusum_thresholds[current_setting]:
                 if e[0] == self.arl:
                     threshold = np.array([e[1]])
                     res = True
+
         # if threshold not is in table, estimate it
         if threshold is None:
             len_simulation = kwargs.pop('len_simulation', None)
@@ -507,11 +167,13 @@ class GaussianCusum(WindowedAndMultivariateCusum):
             self.log.info("estimating threshold...")
             plain_cusum = Cusum(arl=self.arl, beta=self.beta)
             plain_cusum.gamma = self.gamma
-            d2_training = self.chi2dist.rvs(size=(int(len_simulation), 1))
+            d2_training = self._chi2dist.rvs(size=(int(len_simulation), 1))
             kwargs.pop('x', None)
-            res = plain_cusum._estimate_threshold(x=d2_training, dof=self.chi2dist.kwds['df'],
+            res = plain_cusum._estimate_threshold(x=d2_training, dof=self._chi2dist.kwds['df'],
                                                   **kwargs)
             threshold = plain_cusum.threshold
+            
+        # set threshold
         self.threshold = threshold
         return res
 
@@ -528,34 +190,36 @@ class GaussianCusum(WindowedAndMultivariateCusum):
             cdt.fit(x=np.zeros((1, d)), estimate_threshold=True, len_simulation=len_sim,
                     verbose=True, precompute_thresholds=True)
 
-    def compute_local_statistic(self, datapoint):
+    def compute_local_statistic(self, x_win):
         """
         Mahalanobis distance between the mean within the window `datapoint`, and
         the mean computed in the training phase.  More precisely, the distance
-        is squared and rescaled to comply with a \chi^2(d) distribution.
+        is squared and rescaled to comply with a chi^2(d) distribution.
 
-        :param datapoint: (window_size, d) window of observations
-        :return: squared and scaled Mahalobis distance.
+        :param x_win: (no_windows, window_size, d) windows of observations
+        :return: squared and scaled Mahalanobis distance.
         """
-        mu = np.mean(datapoint, axis=0)
-        d2 = scipy.spatial.distance.mahalanobis(mu, self.mu_0,
-                                                self.s2_0inv) ** 2
-        d2 /= (1. / self.training_sample_size + 1. / self.window_size)
+        delta_mu = np.mean(x_win, axis=1) - self._mu_0.reshape(1, -1)
+        # d2_ = np.sum(delta_mu.dot(self._s2_0inv) * delta_mu, axis=1)
+        d2 = np.einsum('ij,ij->i', delta_mu.dot(self._s2_0inv), delta_mu)
+        d2 /= (1. / self._training_sample_size + 1. / self.window_size)
         return d2
 
     @staticmethod
     def test_arl(d, arl, n):
-        mu = np.zeros(d)
-        Sigma = np.eye(d)
-        x = mu + np.dot(np.random.normal(size=(n, d)), Sigma)
+        mu = np.random.randn(d)
+        sigma = np.eye(d) + np.random.rand(d,d)
+        # Sigma += Sigma.transpose()
+        x = mu + np.dot(np.random.randn(n, d), sigma.transpose())
         cdt = cdg.changedetection.cusum.GaussianCusum(arl=arl)
         cdt.fit(x, estimate_threshold=True)
-        cdt.mu_0 = mu
-        cdt.s2_0inv = np.linalg.inv(Sigma)
+        cdt._mu_0 = mu
+        cdt._s2_0inv = np.linalg.inv(np.dot(sigma, sigma.transpose()))
         y_predict, cumulative_sums = cdt.predict(x, reset=True, verbose=False)
         # plt.plot(y_predict)
         # plt.show()
         return np.mean(y_predict)
+
 
 class ManifoldCLTCusum(GaussianCusum):
     """
@@ -565,10 +229,9 @@ class ManifoldCLTCusum(GaussianCusum):
     """
 
     def __init__(self, manifold, arl=100, window_size=1, beta=.75):
-        parent_class = cdg.embedding.manifold.RiemannianManifold
-        if not issubclass(type(manifold), parent_class):
-            raise TypeError('Parameter `manifold` has to be {}'
-                            .format(str(parent_class)))
+        parent_class = cdg.geometry.CCRiemannianManifold
+        assert issubclass(type(manifold), parent_class)
+        
         self.manifold = manifold
         super().__init__(arl=arl, window_size=window_size, beta=beta)
         self.manifold_mu0 = None
@@ -590,7 +253,7 @@ class ManifoldCLTCusum(GaussianCusum):
         """
         Nu = kwargs.pop('tangent_points', None)
         if Nu is None:
-            self.manifold_mu0 = self.manifold.sample_mean(X=x, **kwargs)
+            self.manifold_mu0 = self.manifold.sample_mean(X=x, radius=self.manifold.radius, **kwargs)
             Nu = self.manifold.log_map(x0_mat=self.manifold_mu0, X_mat=x)
         mahal_mat_inv = kwargs.pop('tangent_inv_cov', None)
         if mahal_mat_inv is None:
@@ -629,13 +292,13 @@ class ManifoldCLTCusum(GaussianCusum):
         Sigma = 4 * np.dot(Y.transpose(), Y) / ntot
         return Lambda, Sigma
 
-    def predict(self, x, reset=True, verbose=False):
+    def predict(self, x, reset=True, window_result=False, **kwargs):
         """
         Takes the embedding representation of the manifold testing data, and
         creates the corresponding stream on the tangent space by the Log map.
         """
         Nu = self.manifold.log_map(x0_mat=self.manifold_mu0, X_mat=x)
-        return super().predict(x=Nu, reset=reset, verbose=verbose)
+        return super().predict(x=Nu, reset=reset, window_result=window_result, **kwargs)
 
 
 class DifferenceCusum(Cusum):
@@ -646,11 +309,12 @@ class DifferenceCusum(Cusum):
 
     It implements the structure for three sub-classes, according to three
     hypotheses encoded in the parameter `direction`
-        - two-sided:  H_a : \mu_1 \neq \mu_0
-        - lower:      H_a : \mu_1   <  \mu_0
-        - greater:    H_a : \mu_1   >  \mu_0
-    which monitor respectively `abs(x-\mu_0)`, `\mu_0-x` and `x-\mu_0`.
+        - two-sided:  H_a : mu_1 neq mu_0
+        - lower:      H_a : mu_1  <  mu_0
+        - greater:    H_a : mu_1  >  mu_0
+    which monitor respectively `abs(x-mu_0)`, `mu_0-x` and `x-mu_0`.
     """
+    
     sample_dim = 1
 
     def __init__(self, arl=100, direction='greater', beta=.75):
@@ -659,19 +323,24 @@ class DifferenceCusum(Cusum):
             raise ValueError(
                 'direction <{}> not available.'.format(str(direction)))
         self.direction = direction
-        self.mu_0 = None
-        self.training_sample_size = None
+        self._mu_0 = None
+        self._training_sample_size = None
 
     def fit(self, x, estimate_threshold=False, **kwargs):
 
-        if x is None:
-            self.training_sample_size = 1
-        else:
-            self.training_sample_size = x.shape[0]
+        # if x is None:
+        #     self._training_sample_size = 1
+        # else:
+        #     self._training_sample_size = x.shape[0]
+        self._training_sample_size = x.shape[0]
+        if x.ndim != 2:
+            raise ValueError("x has to be (no_train, d) numpy array, but x.ndim = {}".format(x.ndim))
+        elif x.shape[1] != 1:
+            raise ValueError("{} can only deal with univariate data.".format(self.__class__))
 
-        self.mu_0 = kwargs.pop('mean', None)
-        if self.mu_0 is None:
-            self.mu_0 = np.mean(x, axis=0)
+        self._mu_0 = kwargs.pop('mean', None)
+        if self._mu_0 is None:
+            self._mu_0 = np.mean(x, axis=0)
 
         training_difference = self._process_data(x)
         res = super().fit(x=training_difference, estimate_threshold=estimate_threshold,
@@ -679,14 +348,14 @@ class DifferenceCusum(Cusum):
 
         return res
 
-    def iterate(self, datapoint, reset=False):
-        if datapoint.shape[0] > 1:
+    def iterate(self, datum):
+        if datum.shape[0] > 1:
             raise NotImplementedError()
-        difference = self._process_data(datapoint)
-        return super().iterate(datapoint=difference, reset=reset)
+        difference = self._process_data(datum)
+        return super().iterate(datum=difference)
 
     def _process_data(self, data):
-        raise cdg.util.errors.CDGAbstractMethod()
+        raise cdg.utils.AbstractMethodError()
 
     def _estimate_threshold(self, x, **kwargs):
         """
@@ -697,209 +366,322 @@ class DifferenceCusum(Cusum):
         ordata = kwargs.pop('original_data')
         return super()._estimate_threshold(ordata, **kwargs)
 
+    @classmethod
+    def test_arl(cls, arl, n_train, n_test):
+        mu = np.random.randn()
+        Sigma = np.random.rand()
+        x = mu + np.random.randn(n_train + n_test, 1) * Sigma
+        cdt = cls(arl=arl)
+        cdt.fit(x[:n_train], estimate_threshold=True, verbose=True)
+        y_predict, cumulative_sums = cdt.predict(x[n_train:], reset=True, verbose=False)
+        return np.mean(y_predict)
+
 
 class GreaterCusum(DifferenceCusum):
     def _process_data(self, data):
         data_processed = data.copy()
-        data_processed -= self.mu_0
+        data_processed -= self._mu_0
         return data_processed
 
 
 class LowerCusum(DifferenceCusum):
     def _process_data(self, data):
         data_processed = data.copy()
-        data_processed -= self.mu_0
+        data_processed -= self._mu_0
         return - data_processed
 
 
 class TwoSidedCusum(DifferenceCusum):
     def _process_data(self, data):
         data_processed = data.copy()
-        data_processed -= self.mu_0
+        data_processed -= self._mu_0
         return np.abs(data_processed)
 
 
-class BonferroniCusum(WindowedAndMultivariateCusum):
+class BonferroniCusum(Cusum):
     """
     Ensemble of change detection tests. The inference is made with Bonferroni correction.
+    
+    A general rule is that parameter x can be passed in two ways:
+    :param x: it can be numpy array (no_train, d) and is applied to each
+        cusum. Another possibility is to pass a list of no_cusum elements
+        of dimensions (no_train, d_i) with d_i that may vary.
+
     """
 
-    def __init__(self, cusum_list, arl=100, window_size=1, beta=.75):
+    def __init__(self, cusum_list, arl=100):
         """
 
         :param cusum_list: a list of cusum already initialised
-        :param arl:
-        :param window_size:
+        :param arl: todo
         """
-        super().__init__(arl=arl, beta=beta)
+        super().__init__(arl=arl, beta=None)
         self.cusum_list = cusum_list
         self.no_cusum = len(cusum_list)
         for cusum in self.cusum_list:
             cusum.arl = int(arl * self.no_cusum)
-            cusum.beta = beta
-            cusum.window_size = window_size
 
-    def fit(self, x, estimate_threshold=False, **kwargs):
+    def fit(self, x, estimate_threshold=False, threshold_type='numerical', gamma_type='quantile', **kwargs):
         """
         Here the `fit` function is called on every cusum in the list.
-
-        :param x: it can be numpy array (no_train, d) and is applied to each
-            cusum. Another possibility is to pass a list of no_cusum elements
-            of dimensions (no_train, d_i) with d_i that may vary.
-        ...
+        Parameters can be passed as list or single entities. If they are passed as lists,
+        each element of the list is passed to the corresponding cusum in the list, otherwise
+        the same value is passed to every cusum.
+        :param x: it numpy array (no_train, d).
+        :param estimate_threshold:  ... see Cusum
+        :param threshold_type:  ... see Cusum
+        :param gamma_type:  ... see Cusum
+        :param kwargs:  ... see Cusum
+        :return:
         """
-        radia = kwargs.pop('radia', None)
-        if radia is not None:
-            if len(radia) != self.no_cusum:
-                raise ValueError('The number of radia must be the same as the '
-                                 'number of manifolds.')
+        e_th = estimate_threshold if isinstance(estimate_threshold, list) else [estimate_threshold]*self.no_cusum
+        th_t = threshold_type if isinstance(threshold_type, list) else [threshold_type]*self.no_cusum
+        ga_t = gamma_type if isinstance(gamma_type, list) else [gamma_type]*self.no_cusum
         res = True
-        for i in range(self.no_cusum):
-            cusum = self.cusum_list[i]
-            if isinstance(x, list):
-                x_tmp = x[i]
-            else:
-                x_tmp = x
-            kwargs['radius'] = radia[i]
-            res_tmp = cusum.fit(x=x_tmp, estimate_threshold=estimate_threshold, **kwargs)
-            res = res_tmp and res
+        for ci in range(self.no_cusum):
+            cusum = self.cusum_list[ci]
+            x_tmp = x[ci] if isinstance(x, list) else x
+            res_tmp = cusum.fit(x=x_tmp, estimate_threshold=e_th[ci],
+                                gamma_type=ga_t[ci], threshold_type=th_t[ci], **kwargs)
+            res = res_tmp and res  # checks if every training procedure completed correctly
         return res
 
-    def iterate(self, datapoint, reset=False):
-        alarm = False
-        increments = []
-        self.g=[]
-        for cusum in self.cusum_list:
-            alarm_tmp, inc_tmp = cusum.iterate(datapoint=datapoint, reset=reset)
-            alarm = alarm or alarm_tmp
-            increments.append(inc_tmp)
-            self.g.append(cusum.g)
-        return alarm, increments
-
-    def predict(self, x, reset=True, verbose=False):
+    def predict(self, x, reset=True, **kwargs):
         """
         :param x: it can be numpy array (no_train, d) and is applied to each
             cusum. Another possibility is to pass a list of no_cusum elements
             of dimensions (no_train, d_i) with d_i that may vary.
         ...
         """
-        res = True
-        y_predict = None
-        cumulative_sums = None
-        for i in range(self.no_cusum):
-            cusum = self.cusum_list[i]
-            if isinstance(x, list):
-                x_tmp = x[i]
+
+        if isinstance(x, list):  # check if the I have to pass the same x to every cusum
+            no_test = x[0].shape[0]
+        else:
+            no_test = x.shape[0]
+        y_predict_list = np.empty((self.no_cusum, no_test))
+        cumulative_sums_list = np.empty((no_test, self.no_cusum))
+        for ci in range(self.no_cusum):
+            cusum = self.cusum_list[ci]
+            if isinstance(x, list):  # check if the I have to pass the same x to every cusum
+                x_tmp = x[ci]
             else:
                 x_tmp = x
-            y_tmp, cum_tmp = cusum.predict(x=x_tmp, reset=reset, verbose=verbose)
+            y_tmp, cum_tmp = cusum.predict(x=x_tmp, reset=reset, **kwargs)
+            y_predict_list[ci] = y_tmp[:, 0]
+            cumulative_sums_list[:, ci] = cum_tmp[:, 0]
+        return np.max(y_predict_list, axis=0), cumulative_sums_list
 
-            if y_predict is None:
-                y_predict = y_tmp.copy()
-                cumulative_sums = cum_tmp.copy()
-            else:
-                y_predict = np.logical_and(y_predict, y_tmp)
-                cumulative_sums = np.concatenate((cumulative_sums, cum_tmp),axis=1)
-
-        return y_predict, cumulative_sums
-
-
-
+    @staticmethod
+    def test_arl(arl, n_train, n_test):
+        mu = np.random.randn()
+        Sigma = np.random.rand()
+        x = mu + np.random.randn(n_train + n_test, 1) * Sigma
+        cdt1 = cdg.changedetection.cusum.LowerCusum(arl=arl)
+        cdt2 = cdg.changedetection.cusum.GreaterCusum(arl=arl)
+        cdt = cdg.changedetection.cusum.BonferroniCusum(cusum_list=[cdt1, cdt2], arl=arl)
+        cdt.fit(x[:n_train], estimate_threshold=True, verbose=True)
+        y_predict, cumulative_sums = cdt.predict(x[n_train:], reset=True, verbose=False)
+        return np.mean(y_predict)
+    
 
 def demo():
     import matplotlib.pyplot as plt
     from scipy.stats import multivariate_normal
+    import cdg.embedding
+    
     np.random.seed(123)
     # setup
     sample_size = 5000
+    arl = 100
+    win_size = 10
     cusum = []
-    manifold = []
+    data_train = []
+    data_test = []
 
     # create two multivariate distributions
     rv1 = multivariate_normal(mean=[0., 0.], cov=[[1., 0.], [0., .2]])
-    rv2 = multivariate_normal(mean=[0., 0.], cov=[[1., 0.], [0., 2.]])
+    rv2 = multivariate_normal(mean=[0., 0.2], cov=[[1., 0.], [0., 1.]])
     training_stream = rv1.rvs(size=1000)
     x1 = rv1.rvs(size=int(sample_size / 5 * 4))
     x2 = rv2.rvs(size=int(sample_size / 5))
     test_stream = np.concatenate((x1, x2), axis=0)
+    
+    # univariate
+    training_stream_uni = training_stream[:, :1]
+    test_stream_uni = test_stream[:, :1]
+
+    # # euclidean data
+    # man_euc = cdg.embedding.ccm.EuclideanManifold()
+    # tmp = np.random.rand(1, 3) * 5  # wlog generate a mean
+    # true_mean = man_tmp.clip(X_mat=tmp, radius=man_tmp.radius)
+    # stream_euc_tr = man_tmp.exp_map(x0_mat=true_mean, Nu_mat=training_stream)
+    # stream_euc_te = man_tmp.exp_map(x0_mat=true_mean, Nu_mat=test_stream)
+    
+    # spherical data
+    man_sph = cdg.geometry.SphericalManifold(man_dim=2, radius=3)
+    tmp = np.random.rand(1, 3) * 5  # wlog generate a mean
+    true_mean = man_sph.clip(X_mat=tmp, radius=man_sph.radius)
+    stream_sph_tr = man_sph.exp_map(x0_mat=true_mean, Nu_mat=training_stream)
+    stream_sph_te = man_sph.exp_map(x0_mat=true_mean, Nu_mat=test_stream)
+
+    # hyperbolic data
+    man_hyp = cdg.geometry.HyperbolicManifold(man_dim=2, radius=3)
+    tmp = np.random.rand(1, 3) * 5  # wlog generate a mean
+    true_mean = man_hyp.clip(X_mat=tmp, radius=man_hyp.radius)
+    stream_hyp_tr = man_hyp.exp_map(x0_mat=true_mean, Nu_mat=training_stream)
+    stream_hyp_te = man_hyp.exp_map(x0_mat=true_mean, Nu_mat=test_stream)
+
+    # gaussian no window
+    cusum.append(GaussianCusum(arl=arl))
+    data_train.append(training_stream)
+    data_test.append(test_stream)
+    # gaussian windowed
+    cusum.append(GaussianCusum(arl=arl, window_size=win_size))
+    data_train.append(training_stream)
+    data_test.append(test_stream)
+    
+    for i in range(2):
+        cusum.append(None)
+        data_train.append(None)
+        data_test.append(None)
+
+    # lower
+    cusum.append(LowerCusum(arl=arl))
+    data_train.append(training_stream_uni)
+    data_test.append(test_stream_uni)
+    # greater
+    cusum.append(GreaterCusum(arl=arl))
+    data_train.append(training_stream_uni)
+    data_test.append(test_stream_uni)
+    # two-sided
+    cusum.append(TwoSidedCusum(arl=arl))
+    data_train.append(training_stream_uni)
+    data_test.append(test_stream_uni)
+    # bonferroni on different cusum
+    bonf_cusum = BonferroniCusum(arl=arl, cusum_list=[LowerCusum(arl=arl),
+                                                      TwoSidedCusum(arl=arl)]) #,
+                                                      # GreaterCusum(arl=arl)])
+    cusum.append(bonf_cusum)
+    data_train.append(training_stream_uni)
+    data_test.append(test_stream_uni)
 
     # euclidean windowed
-    man_tmp = cdg.embedding.manifold.EuclideanManifold()
-    cusum.append(ManifoldCLTCusum(arl=100, manifold=man_tmp, window_size=10))
-    manifold.append(man_tmp)
+    # cusum_euc = ManifoldCLTCusum(arl=arl, manifold=man_euc, window_size=win_size)
+    cusum_euc = GaussianCusum(arl=arl, window_size=win_size)
+    cusum.append(cusum_euc)
+    data_train.append(training_stream)
+    data_test.append(test_stream)
     # spherica windowed
-    man_tmp = cdg.embedding.manifold.SphericalManifold()
-    man_tmp.set_radius(value=3)
-    cusum.append(ManifoldCLTCusum(arl=100, manifold=man_tmp, window_size=10))
-    manifold.append(man_tmp)
+    cusum_sph = ManifoldCLTCusum(arl=arl, manifold=man_sph, window_size=win_size)
+    cusum.append(cusum_sph)
+    data_train.append(stream_sph_tr)
+    data_test.append(stream_sph_te)
     # hyperbolic windowed
-    man_tmp = cdg.embedding.manifold.HyperbolicManifold()
-    man_tmp.set_radius(value=3)
-    cusum.append(ManifoldCLTCusum(arl=100, manifold=man_tmp, window_size=10))
-    manifold.append(man_tmp)
-    # gaussian no window
-    cusum.append(GaussianCusum(arl=100))
-    manifold.append(None)
-    # gaussian windowed
-    cusum.append(GaussianCusum(arl=100, window_size=10))
-    manifold.append(None)
-    # lower
-    cusum.append(GreaterCusum(arl=100))
-    manifold.append(None)
-    # greater
-    cusum.append(LowerCusum(arl=100))
-    manifold.append(None)
-    # two-sided
-    cusum.append(TwoSidedCusum(arl=100))
-    manifold.append(None)
+    cusum_hyp = ManifoldCLTCusum(arl=arl, manifold=man_hyp, window_size=win_size)
+    cusum.append(cusum_hyp)
+    data_train.append(stream_hyp_tr)
+    data_test.append(stream_hyp_te)
     # bonferroni on different cusum
-    bonf_cusum = BonferroniCusum(arl=100, window_size=1,
-                                 cusum_list=[LowerCusum(arl=100),
-                                             TwoSidedCusum(arl=100),
-                                             GreaterCusum(arl=100)])
+    bonf_cusum = BonferroniCusum(arl=arl, cusum_list=[cusum_euc, cusum_sph, cusum_hyp])
     cusum.append(bonf_cusum)
-    manifold.append(None)
+    data_train.append([training_stream, stream_sph_tr, stream_hyp_tr])
+    data_test.append([test_stream, stream_sph_te, stream_hyp_te])
+
+   
 
     fig1 = plt.figure()
-    for i in range(len(cusum)):
-        if isinstance(cusum[i], ManifoldCLTCusum):
-            tmp = np.random.rand(1, 3) * 5
-            if isinstance(cusum[i].manifold, cdg.embedding.manifold.EuclideanManifold):
-                tmp = tmp[:-1]
-            true_mean = manifold[i].clip(X_mat=tmp, radius=manifold[i].radius)
-            training_stream_man = manifold[i].exp_map(
-                x0_mat=true_mean,
-                Nu_mat=training_stream)
-            test_stream_man = manifold[i].exp_map(
-                x0_mat=true_mean, Nu_mat=test_stream)
-
-            cusum[i].fit(training_stream_man, estimate_threshold=True,
-                         len_simulation=1000)
-            y_pred, gg = cusum[i].predict(test_stream_man, reset=False)
-
-        elif isinstance(cusum[i], GreaterCusum) \
-                or isinstance(cusum[i], TwoSidedCusum) \
-                or isinstance(cusum[i], LowerCusum):
-            cusum[i].fit(training_stream[:, 1:], estimate_threshold=True,
-                         len_simulation=1000)
-            y_pred, gg = cusum[i].predict(test_stream[:, 1:], reset=False)
-        else:
-            cusum[i].fit(training_stream[:, 1:], estimate_threshold=True,
-                         len_simulation=1000)
-            y_pred, gg = cusum[i].predict(test_stream[:, 1:], reset=False)
-            gg = np.array(gg)[:,0]
-
-        sp = fig1.add_subplot(331 + i)
-        sp.plot(y_pred*max(gg), '+k')
-        sp.plot(gg, label='g')
-        sp.plot([cusum[i].threshold] * len(gg), label='h')
-        sp.grid(True)
-        sp.set_title(str(type(cusum[i]))[-20:])
+    for ci in range(len(cusum)):
+        if not cusum[ci] is None:
+            cusum[ci].fit(data_train[ci], estimate_threshold=True, len_simulation=1000)
+            y_pred, gg = cusum[ci].predict(data_test[ci], reset=False)
+            gg = np.mean(gg, axis=1) # only necessary for bonferroni
+            sp = fig1.add_subplot(3,4, 1 + ci)
+            sp.plot(y_pred*max(gg), '+k')
+            sp.plot(gg, label='g')
+            sp.plot([cusum[ci].threshold] * len(gg), label='h')
+            sp.grid(True)
+            sp.set_title(str(type(cusum[ci]))[-20:])
 
     plt.show()
 
+def test1():
+    
+    x = np.random.uniform(100, 500, size=(10000, 3))
+    x_test = np.random.uniform(100, 500, size=(200000, 3))
 
+    
+    cdt = GaussianCusum(arl=100, window_size=100)
+    cdt.fit(x, estimate_threshold=True, len_simulation=1e3)
+
+    pred, cum_sum = cdt.predict(x_test, reset=True)
+    pred = np.array(pred).astype(int)
+
+    y_true = np.zeros((1,20000))
+    y_pred = pred
+    # y_pred = pred.reshape(-1,1000).mean(-1).round().reshape(-1)
+
+    import matplotlib.pyplot as plt
+    plt.plot(cum_sum)
+    plt.axhline(cdt.threshold)
+    plt.show()
+    from sklearn.metrics import confusion_matrix
+    # # tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    # tpr = tp / (tp + fn)
+    # fpr = fp / (fp + tn)
+    return
+
+
+def test2():
+    import numpy as np
+    N = 400
+    N_train = 100
+    N_change = 320
+    alpha = 0.01
+    
+    x = np.random.normal(size=(N, 1))
+    x[N_change:] += 1.
+    
+    from cdg.changedetection import GaussianCusum
+    cdt = GaussianCusum(arl=round(1. / alpha))
+    cdt.fit(x[:N_train])
+    y, g = cdt.predict(x, reset=False)
+
+    cdt.reset()
+    print(cdt.threshold)
+    cdt.fit(x[:N_train])
+    for t in range(N):
+        alarm, _ = cdt.iterate(x[t:t + 1])
+        if alarm:
+            print("An alarm is raised at time {}".format(t))
+            cdt.reset()
+    
+    
+def test3():
+    from cdg.graph import DelaunayGraphs, convert
+    no_nodes = 5
+    no_graphs = {0: 500, 8: 50}
+    model = DelaunayGraphs()
+    G = model.get(seed_points=no_nodes, classes=list(no_graphs.keys()),
+                  no_graphs=no_graphs, sigma=.3, include_seed_graph=False)
+    
+    from cdg.graph.distance import GraphEditDistanceNX
+    ged = GraphEditDistanceNX(node_cost='euclidean', n_jobs=2)
+    Gnx = convert(G[0] + G[8], format_in='cdg', format_out='nx')
+    G_train, G_test = Gnx[:50], Gnx[50:]
+    
+    from cdg.embedding import MultiDimensionalScaling
+    mds = MultiDimensionalScaling(emb_dim=2, nprot=5)
+    mds.fit(graphs=G_train, dist_fun=ged.get_measure_fun(verbose=True))
+    x = mds.transform(G_test)
+    
+    from cdg.changedetection import GaussianCusum
+    cdt = GaussianCusum(window_size=5, arl=20)
+    cdt.fit(x[:100])
+    y, g = cdt.predict(x, reset=False)
 
 if __name__ == "__main__":
     # GaussianCusum.precomp_threshold([1, 2], len_sim=1e3)
-    demo()
+    # test1()
+    # demo()
+    # test2()
+    test3()

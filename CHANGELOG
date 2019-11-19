@@ -1,0 +1,32 @@
+# Changelog
+
+
+## v-2.1 - 2019-05-16
+
+### Added
+- Change-point methods.
+- Some two-sample test.
+- Degree-corrected stochastic block model
+
+### Changed
+- Simplified API and interface.
+
+### Removed
+
+
+## v-2.0 - 2018-05-29
+
+### Added
+- Support to costant-curvature manifolds.
+- Some utilities, like logging.
+- Installation via `setup.py`.
+
+### Changed
+- Major changes in the API and interface.
+- Improvement to the module structure: improved modularity.
+
+### Removed
+
+
+## v-1.0 - 2017-09-27
+...

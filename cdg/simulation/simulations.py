@@ -1,64 +1,26 @@
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# --------------------------------------------------------------------------------
+# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
 #
-# Description:
-# ---------
-# Repeated experiments of change detection on a graph stream.
-#
-#
-# References:
-# ---------
-# [tnnls17]
-#   Zambon, Daniele, Cesare Alippi, and Lorenzo Livi.
-#   Concept Drift and Anomaly Detection in Graph Streams.
-#   IEEE Transactions on Neural Networks and Learning Systems (2018).
-#
-# ------------------------------------------------------------------------------
-# Copyright (c) 2017-2018, Daniele Zambon
-# All rights reserved.
-# Licence: BSD-3-Clause
-# ------------------------------------------------------------------------------
-# Author: Daniele Zambon 
-# Affiliation: Università della Svizzera italiana
-# eMail: daniele.zambon@usi.ch
-# Last Update: 25/04/2018
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
+# Implements functionalities for repeated experiments.
+# --------------------------------------------------------------------------------
 import sys
 import os
 import subprocess
 import shutil
+from collections import OrderedDict
 import numpy as np
 import scipy
 import scipy.stats
-import cdg.util.errors
-import cdg.changedetection.cusum
+import cdg.utils
+import sklearn.metrics
+
+import cdg.changedetection
 import cdg.graph
-import cdg.embedding.manifold
-import cdg.util.prototype
-import cdg.util.logger
-import cdg.util.serialise
+import cdg.embedding
 
-
-def binom_se(p, n):
-    return np.sqrt(p * (1 - p) / n)
-
-
-def binom_ci95(p, sim):
-    # ISSUE: for p=0 scipy.binom.ppf return n-1
-    # https://github.com/scipy/scipy/issues/1603
-    # https://github.com/scipy/scipy/issues/5122
-    # This code is work around to by pass it
-    if p == 0:
-        a = 0.0
-        b = 0.0
-    elif p == 1:
-        a = 1.0
-        b = 1.0
-    else:
-        a = scipy.stats.binom.ppf(q=.025, n=sim, p=p, loc=0) / sim
-        b = scipy.stats.binom.ppf(q=.975, n=sim, p=p, loc=0) / sim
-    return a, b
-
+# def binom_se(p, n):     TODO See bernoulli_mean_percentile
+# def binom_ci95(p, sim): TODO See bernoulli_mean_percentile
+# def binom_iqr(p, sim):  TODO See bernoulli_mean_percentile
 
 def process_run_lengths(runLen, default=-1):
     meanRunLen = []
@@ -73,55 +35,148 @@ def process_run_lengths(runLen, default=-1):
             meanRunLen.append(default)
     return meanRunLen, alarms, cleanMeanRunLen
 
+def create_foldername(prefix, exp_name, pars, cpm, main_folder=None):
+    '''A predefined format for naming the folder that will contain the results.'''
+    cls_str = ''
+    for c in pars.classes:
+        cls_str += '-'+str(c)
+    folder_format = '{prefix}{time}[{exp_name}]emb_{emb}_cls_{cls}_cpm{cpm}'
+    folder_str = folder_format.format(prefix=prefix,
+                                      time=pars.creation_time.strftime('%G%m%d_%H%M_%S'),
+                                      exp_name=exp_name,
+                                      emb=pars.embedding_method,
+                                      cls=cls_str,
+                                      cpm=cpm.name)
+    
+    if main_folder is None:
+        pass
+    elif main_folder[-1] == '/':
+        folder_str = '{}{}'.format(main_folder, folder_str)
+    else:
+        folder_str = '{}/{}'.format(main_folder, folder_str)
+    return folder_str
 
-class Simulation(cdg.util.logger.Loggable, cdg.util.serialise.Pickable):
-    """
-    Parent class dealing with the parameters and performance assessment.
-    """
+def get_figures_merit():
+    '''Collect list (actually a dict) of figures of merit from both the online and offline cases.'''
+    figure_merit_online = SimulationCDT.figure_merit_list()
+    figure_merit_offline = SimulationCPM.figure_merit_list()
+
+    all_figures_merit = figure_merit_online.copy()
+    all_figures_merit.update(figure_merit_offline)
+    return  all_figures_merit
+
+def read_resultfile(zipped_file_path, figure_merit, params, simulation_fname='simulation.pkl'):
+    import tempfile
+    import zipfile
+    import shutil
+
+    # read zipped result file
+    cdg.utils.logger.info('computing results...')
+    assert os.path.isfile(zipped_file_path), 'zip file {} not found. Try with the absolute path.'.format(
+        zipped_file_path)
+    zfile = zipfile.ZipFile(zipped_file_path)
+    
+    # path to result file relative to the zipped file
+    zipped_file_path_no_extension = zipped_file_path[:-4]
+    read_from_here = zipped_file_path_no_extension.rfind('/') + 1
+    simulation_file_relpath = '{}/{}'.format(zipped_file_path_no_extension[read_from_here:], simulation_fname)
+    
+    # unzip result file
+    unzip_dir_temp = tempfile.mkdtemp(prefix='cdg_read_resultfile')
+    simulation_file_unzipped = zfile.extract(simulation_file_relpath, path=unzip_dir_temp)
+    
+    # deserialise simulation
+    simulation = Simulation.deserialise(simulation_file_unzipped)
+    
+    # remove temporary folder
+    shutil.rmtree(unzip_dir_temp, ignore_errors=True)
+    
+    # process result file
+    fig_mer_list, results, _ = simulation.process_results(figure_merit)
+    # fig_mer_list, results = tmp[0], tmp[1]
+    
+    selected_results = OrderedDict()
+    # for fig_mer in results.keys():
+    #     if fig_mer in fig_mer_list:
+    #         selected_results[fig_mer] = results[fig_mer]
+    for fig_mer in fig_mer_list:
+        selected_results[fig_mer] = results[fig_mer]
+
+    settings = OrderedDict()
+    for p in params:
+        if p == 'debug':
+            settings[p] = 'debug'
+        elif p == 'cpm':
+            settings[p] = None if simulation.cpm is None else simulation.cpm.name
+        elif p == 'emb_method':
+            settings[p] = simulation.pars.embedding_method.name
+        elif p == 'emb_dim':
+            settings[p] = simulation.pars.embedding_dimension
+        elif p == 'dataset':
+            settings[p] = None if simulation.dataset is None else simulation.dataset.name
+        elif p == 'classes':
+            cls_str = ''
+            for c in simulation.pars.classes:
+                cls_str += '.{}'.format(str(c))
+            settings[p] = cls_str
+        else:
+            settings[p] = simulation.__getattribute__(p)
+        
+    return selected_results, settings
+    # tabularResult, _ = main(sys.argv[1:])
+    # print(tabularResult[1])
+    # for i in range(0, len(tabularResult[0][0])):
+    #     print(tabularResult[0][0][i] + ':\t' + tabularResult[0][1][i])
+
+
+class Simulation(cdg.utils.Loggable, cdg.utils.Pickable):
+    """ Parent class dealing with the parameters and performance assessment. """
 
     # this is a list of known exception that are known that may occur, and
     # which we want to deal with
-    _controlled_exceptions = (np.linalg.LinAlgError)
-
+    _controlled_exceptions = (np.linalg.LinAlgError, cdg.utils.EDivisiveRFileNotFoundError)
+    _figure_merit_list = {None: ''}
+    _exp_result_and_setup_file = "/000_experiment_setup_and_results.txt"
     def __init__(self):
-        cdg.util.logger.Loggable.__init__(self)
-        # cdg.util.serialise.Pickable.__init__(self)
-        self.skip_from_serialising(['dataset'])
+        cdg.utils.Pickable.__init__(self)
+        cdg.utils.Loggable.__init__(self)
+        # self.skip_from_serialising(['dataset'])
 
         self.pars = None
         self.dataset = None
         self.no_simulations = None
 
-    def set(self, parameters, dataset, no_simulations, folder,
-            load_dataset=True):
+    def set(self, parameters, dataset, no_simulations,
+            folder='./cdg_result', load_dataset=True):
         """
 
-        :param parameters: instance of cdg.stream.parameters.Parameters
-        :param dataset: instance of cdg.graph.database.Database
+        :param parameters: instance of class Parameters
+        :param dataset: instance of cdg.graph.database.Database # todo
         :param no_simulations: number of repeated experiments in the same
             parameter setting
         :param folder: absolute path to folder in which to store the outcome
         :param load_dataset: flag for whether to load precomputed
             dissimilarities
         """
+        # todo maybe parameters can be passed as a dictionary, and the creation of Parameters instance
+        # is performed directly here. There is a need of parameters that user can set
         self.pars = parameters
         self.dataset = dataset
         self.no_simulations = no_simulations
         self.folder = folder
 
-        # load dataset
-        if load_dataset:
-            self.log.info('retrieving precomputed dissimilarities...')
-            self.dataset.load_graph_name_map()
-            self.dataset.load_dissimilarity_matrix()
+        if load_dataset and not dataset.is_loaded:
+            self.log.info('loading dataset...')
+            self.dataset.load()
 
     def empty_results(self):
         pass
 
-    def run(self, seed=None, logfile=None):
+    def run(self, seed=None, logfile=None, **kwargs):
         """
         Run repeated simulations and perform some processing of the results.
-        :param seed: (None) global seed for replicability
+        :param seed: (int, def=None) global seed for replicability
+        :param logfile: (str, def=None) path to the logfile, if any, to store in the zip file.
         :return: run lengths under H0, run lengths under H1
         """
 
@@ -136,55 +191,54 @@ class Simulation(cdg.util.logger.Loggable, cdg.util.serialise.Pickable):
         if seed is not None:
             np.random.seed(seed)
         self.seed = seed
+        self.log.info('seed: ' + str(self.seed))
 
         # create output folder
         if not os.path.exists(self.folder):
             os.makedirs(self.folder)
 
         # auxiliar variables
-        h_threshold = None
-        ctSimulation = 0
+        pass_to_next = None # Todo da rimuovere da questa classe
+        ct_simulation = 0
 
-        while ctSimulation < self.no_simulations:
+        while ct_simulation < self.no_simulations:
 
-            self.log.info("Running simulation {} / {}"
-                          .format(ctSimulation + 1, self.no_simulations))
+            self.log.info("Running simulation {} / {}".format(ct_simulation + 1, self.no_simulations))
 
             try:
                 # run simulation
-                h_threshold = self.run_single_simulation(threshold=h_threshold)
+                pass_to_next = self.run_single_simulation(pass_to_next=pass_to_next, **kwargs)
                 # count simulation as correctly terminated
-                ctSimulation += 1
+                ct_simulation += 1
                 self.log.debug("status = completed")
 
             except self._controlled_exceptions as e:
                 # here goas a list o
                 # record failed simulation
-                self.fails.append(ctSimulation)
+                self.fails.append(ct_simulation)
                 self.log.warning("status = failed: {}".format(e))
 
-            if len(self.fails) > max_num_failure:
-                raise cdg.util.errors.CDGError(
-                    'We reached %d failed simulation.' % len(self.fails))
+            assert len(self.fails) <= max_num_failure, 'We reached {} failed simulation.'.format(len(self.fails))
 
         self.serialise(self.folder + "/simulation.pkl")
         self.write_results()
 
         # Compress results in a .zip archive
         if logfile is not None:
-            shutil.move(logfile, self.folder + '/' + logfile)
-        command = 'zip -m ' + self.folder + '.zip ' + self.folder + ' -r '
+            shutil.copy(logfile, self.folder + '/' + logfile)
+        # command = 'zip -m ' + self.folder + '.zip ' + self.folder + ' -r '
+        command = 'zip -m {0:s}.zip {0:s} -r'.format(self.folder)
         self.log.debug("executing: " + command)
         subprocess.Popen(command.split()).wait()
 
-    def run_single_simulation(self, threshold=None):
-        raise cdg.util.errors.CDGAbstractMethod()
+    def run_single_simulation(self, pass_to_next=None):
+        raise cdg.utils.AbstractMethodError()
 
     def string_raw_results(self):
-        raise cdg.util.errors.CDGAbstractMethod()
+        return 'changes_true = ' + str(self.changes_true) + '\nchanges_est = ' + str(self.changes_est)
 
     def process_results(self, figures_merit=None):
-        raise cdg.util.errors.CDGAbstractMethod()
+        assert figures_merit in self._figure_merit_list.keys(), 'figure of merit {} not in the list.'.format(figures_merit)
 
     def write_results(self, figures_merit=None):
         """
@@ -196,7 +250,7 @@ class Simulation(cdg.util.logger.Loggable, cdg.util.serialise.Pickable):
         """
 
         # open output file
-        f = open(self.folder + "/000_experiment_setup_and_results.txt", 'w')
+        f = open(self.folder + self._exp_result_and_setup_file, 'w')
 
         # parameters and settings of the simulation
         f.writelines('# # # # # # # # # # # # # # #' + '\n')
@@ -204,10 +258,9 @@ class Simulation(cdg.util.logger.Loggable, cdg.util.serialise.Pickable):
         f.writelines('# # # # # # # # # # # # # # #' + '\n')
         f.writelines(self.folder + '\n')
         f.writelines(str(self.pars))
-        f.writelines(str(self.dataset))
+        # f.writelines(str(self.dataset))
         f.writelines('\n')
-        f.writelines(
-            'number of concluded simulation:' + str(self.no_simulations) + '\n')
+        f.writelines('number of concluded simulation:' + str(self.no_simulations) + '\n')
         f.writelines('seed:' + str(self.seed) + '\n')
         f.writelines('\n\n')
 
@@ -223,26 +276,46 @@ class Simulation(cdg.util.logger.Loggable, cdg.util.serialise.Pickable):
         f.writelines('# # # # # # # # # # # # # # #' + '\n')
         f.writelines('# # # Processed results # # #' + '\n')
         f.writelines('# # # # # # # # # # # # # # #' + '\n')
-        tabularResult, printout = self.process_results(figures_merit=figures_merit)
+        fm, result, printout = self.process_results(figures_merit=figures_merit)
         f.writelines(printout + '\n')
 
         # close file
         f.close()
 
-        self.log.info(tabularResult)
-        return tabularResult
+        self.log.info([fm, result])
+        return [fm, result]
 
     @staticmethod
     def sequence_generator(dataset, pars):
-        raise cdg.util.errors.CDGAbstractMethod()
+        raise cdg.utils.AbstractMethodError()
 
 
-class SimulationOnline(Simulation):
+class SimulationCDT(Simulation):
+    """ Environment for assessing the performance of a CDT. """
+
+    def __init__(self):
+        # self.skip_from_serialising(['cpm'])
+        super().__init__()
+        raise NotImplementedError()
+    
+    @classmethod
+    def figure_merit_list(cls):
+        cls._figure_merit_list['dc'] = ['dc_rate', 'dc_rate_95ci']
+        cls._figure_merit_list['dca'] = ['dca_rate', 'dca_rate_95ci']
+        cls._figure_merit_list['arl'] = ['arl0', 'arl0_95ci', 'arl1', 'arl1_95ci']
+        cls._figure_merit_list['fa1000'] = ['fa1000_rate', 'fa1000_rate_std']
+
+        cls._figure_merit_list['dcaarl'] = cls._figure_merit_list['dca'] + cls._figure_merit_list['arl']
+        cls._figure_merit_list['tnnls'] = cls._figure_merit_list['dca'] + cls._figure_merit_list['arl'] + cls._figure_merit_list['fa1000']
+
+        cls._figure_merit_list['mat'] = ['matlab']
+        return cls._figure_merit_list
+
     def empty_results(self):
         self.runLen0 = []
         self.runLen1 = []
 
-    def run_single_simulation(self, threshold=None):
+    def run_single_simulation(self, pass_to_next=None, **kwargs):
         """
         Implements the specific simulation of this class
         :param threshold: (None) a predefined threshold for the cusum, otherwise estimated
@@ -256,7 +329,7 @@ class SimulationOnline(Simulation):
         [self.log.debug(m) for m in message]
 
         self.log.debug('training...')
-        cusum = self.training_part(x_train, self.pars, threshold=threshold)
+        cusum = self.training_part(x_train, self.pars, threshold=pass_to_next['threshold'])
 
         self.log.debug('operating phase...')
         self.logplot(
@@ -272,7 +345,7 @@ class SimulationOnline(Simulation):
         self.runLen0.append(runLen0_tmp)
         self.runLen1.append(runLen1_tmp)
 
-        return cusum.threshold
+        return {'threshold': cusum.threshold}
 
     @classmethod
     def generate_embedding_part(cls, dataset, pars, message=None):
@@ -297,6 +370,13 @@ class SimulationOnline(Simulation):
                                                      sequence_test=streamTest,
                                                      no_train_for_embedding=pars.train_embedding_t)
         return x_train, x, message
+
+
+    @classmethod
+    def sequence_embedding(cls, embedding_space, dataset,
+                           sequence_train, sequence_test, no_train_for_embedding=0,
+                           message=None):
+        raise cdg.util.errors.CDGAbstractMethod()
 
     @staticmethod
     def sequence_generator(dataset, pars):
@@ -424,17 +504,18 @@ class SimulationOnline(Simulation):
         return 'runLen0 = ' + str(self.runLen0) + '\n' + 'runLen1 = ' + str(
             self.runLen1)
 
-    def process_results(self, figures_merit):
+    def process_results(self, figures_merit='dca'):
         """
         Process the outcomes for synthetic results.
         :param figures_merit: list of figures of merit to be printed
         """
 
-        if figures_merit is None:
-            figures_merit = ['dca_rate']
+        super().process_results(figures_merit=figures_merit)
 
         printout = ''
         result = {}
+        
+        raise NotImplementedError('please fix according to SimCPM editions and fixes')
 
         # process alarms
         try:
@@ -623,155 +704,285 @@ class SimulationOnline(Simulation):
                 closingString += '\t % %s\n' % self.dataset.notes
             except:
                 closingString += '\n'
-
-            if figures_merit[0] == 'matlab':
-                figures_merit = [
-                    '{[dca rate ,  dca rate a ,  dca rate b , no Prot ,  win Size] ,  "M..n.._name"}']
-                selectedResults = ["{[%f,%f,%f], 'M=%d, n=%s'}, ... %s" % (
-                    dca_rate, dca_rate_a, dca_rate_b, self.pars.embeddingDimension,
-                    self.pars.window_size, self.dataset)]
-            else:
-                selectedResults = []
-                for figMer in figures_merit:
-                    selectedResults.append(result[figMer])
-
             # # Footer message
             printout += '\n\nAll went well, apparently.\n\n'
-            return [figures_merit, selectedResults], printout
+
+            return self._figure_merit_list[figures_merit], result, printout
 
         except IndexError:
             self.log.warning('something went wrong in computing the results.')
             printout += '....something went wrong....'
-            return None, printout
+            return None, None, printout
 
 
-class SimulationPrototypeBased(SimulationOnline):
-    @classmethod
-    def sequence_embedding(cls, embedding_space, dataset,
-                           sequence_train, sequence_test, no_train_for_embedding=0,
-                           message=None):
+class SimulationCPM(Simulation):
+    """ Environment for assessing the performance of a CPM. """
+
+    changes_true = None
+    changes_est = None
+    cpm = None
+    use_fwer = None
+
+    def __init__(self, cpm=None, use_fwer=True):
         """
-        Learns the embedding map based on prototypes. Then it maps the training
-        and test grapphs into the embedding space.
-        :param embedding_space: space onto which the embedding function maps the
-            data. This has to be a subclass instance of
-            cdg.embedding.embedding.DissimilarityRepresentation.
-        :param dataset: dataset
-        :param sequence_train: training sequence
-        :param sequence_test: testing sequence
-        :param no_train_for_embedding: number of training datapoints in the
-            `sequence_train` used to learn the mapping
-        :param message: logging string
-        :return:
-            - x_train : training sequence of embedding points
-            - x_test : test sequence of embedding points
+        :param cpm: instance of class cdg.changedetection.CPM
         """
-        if message is None: message = []
-
-        if not issubclass(type(embedding_space),
-                          cdg.embedding.embedding.DissimilarityRepresentation):
-            raise cdg.util.errors.CDGForbidden("not very elegant, but works")
-
-        sequence_trainEmbedding = sequence_train[:no_train_for_embedding]
-
-        # select the prototypes
-        diss_matrix_prot_sel = dataset.get_sub_dissimilarity_matrix(sequence_trainEmbedding,
-                                                                    sequence_trainEmbedding)
-        if not np.allclose(diss_matrix_prot_sel, diss_matrix_prot_sel.transpose()):
-            msg = 'The dissimilarity matrix is not symmetric; I will make it symmetric'
-            cdg.util.logger.glog().warning(msg)
-            message.append(msg)
-            diss_matrix_prot_sel += diss_matrix_prot_sel.transpose()
-            diss_matrix_prot_sel *= .5
-
-        embedding_space.reset()
-        embedding_space.fit(dissimilarity_matrix=diss_matrix_prot_sel, no_annealing=20)
-        prototypes = [sequence_trainEmbedding[i] for i in embedding_space.prototype_indices]
-
-        # dissimilarity representation
-        y_train = dataset.get_sub_dissimilarity_matrix(prototypes,
-                                                       sequence_train[no_train_for_embedding:])
-        y_test = dataset.get_sub_dissimilarity_matrix(prototypes, sequence_test)
-
-        # manifold representation
-        cdg.util.logger.glog().debug("x_train starting...")
-        x_train = embedding_space.predict(y_train.transpose())
-        x_test = embedding_space.predict(y_test.transpose())
-
-        return x_train, x_test, message
-
-
-class SimulationFeature(SimulationOnline):
-    """
-    Simulation monitoring a single feature.
-    """
+        # self.skip_from_serialising(['cpm'])
+        super().__init__()
+        self.cpm = cpm
+        self.use_fwer = use_fwer
 
     @classmethod
-    def sequence_embedding(cls, embedding_space, dataset,
-                           sequence_train, sequence_test, no_train_for_embedding=0,
-                           message=None):
+    def figure_merit_list(cls):
+        cls._figure_merit_list['discr'] = ['discr', 'discr_iqr']
+        # cls._figure_merit_list['discrn'] = ['discrn', 'discrn_iqr']
+        # # cls._figure_merit_list['ari'] = ['ari', 'ari_iqr']
+        # cls._figure_merit_list['tpr'] = ['tpr', 'tpr_iqr']
+        # cls._figure_merit_list['fpr'] = ['fpr', 'fpr_iqr']
+        cls._figure_merit_list['tpr'] = ['tpr', 'tpr_95ci']
+        cls._figure_merit_list['fpr'] = ['fpr', 'fpr_95ci']
+        cls._figure_merit_list['ari'] = ['ari', 'ari_95ci']
+        cls._figure_merit_list['rte'] = ['discrn', 'discrn_95ci']
+        cls._figure_merit_list['cps'] = cls._figure_merit_list['tpr'] + cls._figure_merit_list['fpr']
+        cls._figure_merit_list['tsp'] =  cls._figure_merit_list['cps'] + cls._figure_merit_list['ari'] + cls._figure_merit_list['rte']
+        cls._figure_merit_list['tspiq'] = ['tpr', 'tpr_iqr'] + ['tpr', 'tpr_iqr'] + ['ari', 'ari_iqr'] + ['discrn', 'discrn_iqr']
+        cls._figure_merit_list['tsp90'] = ['tpr', 'tpr_90ci'] + ['tpr', 'tpr_90ci'] + ['ari', 'ari_90ci'] + ['discrn', 'discrn_90ci']
+        return cls._figure_merit_list
 
-        if message is None: message = []
+    def empty_results(self):
+        self.changes_true = []
+        self.changes_est = []
 
-        if not issubclass(type(embedding_space),
-                          cdg.embedding.feature.GraphFeature):
-            raise cdg.util.errors.CDGForbidden("not very elegant, but works")
+    def run_single_simulation(self, pass_to_next=None, **kwargs):
 
-        x_train = embedding_space.predict(graph_list=sequence_train, dataset=dataset)
-        x_test = embedding_space.predict(graph_list=sequence_test, dataset=dataset)
+        self.log.debug('sequence generation...')
+        return_indices = self.dataset.has_prec_distance()
+        g_train, g_test, change_points = self.sequence_generator(dataset=self.dataset, pars=self.pars,
+                                                                 return_indices=return_indices)
+        self.changes_true.append(change_points)
 
-        return x_train, x_test, message
+        self.log.debug('embedding...')
+        self.pars.embedding_method.fit(graphs=g_train, dist_fun=self.dataset.distance_measure, **kwargs)
+        x = self.pars.embedding_method.transform(data=g_test)
 
+        self.log.debug('operating phase...')
+        self.cpm.reset()
+        change_points_est, _ = self.cpm.predict(x=x, alpha=self.pars.significance_level,
+                                                margin=self.pars.margin, fwer=self.use_fwer, 
+                                                verbose=not self.use_fwer, **kwargs)
+        self.changes_est.append(change_points_est)
 
-class SimulationCLT(SimulationOnline):
-    """ Adopts the cdg.changedetection.GaussianCusum change detection test (CDT). """
+        return change_points_est
+
 
     @classmethod
-    def training_part(cls, x_train, pars, threshold=None):
-        """
-        :param x_train: sequence used to train the CDT
-        :param pars:parameters
-        :param threshold: threshold for the CDT
-        :return:
-        """
-        cusum = cdg.changedetection.cusum.GaussianCusum(arl=pars.arl_w(),
-                                                        window_size=pars.window_size)
-        if threshold is None:
-            cusum.fit(x=x_train, beta=pars.beta, estimate_threshold=True,
-                      gamma_type='quantile',
-                      len_simulation=pars.no_simulations_thresh_est)
+    def sequence_generator(cls, dataset, pars, return_indices=True):
+        # parse possible None parameters
+        lenghts = [len(dataset.elements[c]) for c in pars.classes] if pars.subseq_lengths_t is None else pars.subseq_lengths_t
+        ratios = [1. for _ in pars.classes] if pars.subseq_ratios is None else pars.subseq_ratios
+
+        # init
+        sequence_train = []
+        sequence_test = []
+        changes = []
+
+        # browse all subsequence
+        for i in range(len(pars.classes)):
+            # bootstrap lenghts[i] objects from the class[i] and lenghts[i] from the whole data set
+            inclass = np.random.choice(dataset.elements[pars.classes[i]], size=lenghts[i])
+            outclass = np.random.choice(dataset.get_all_elements(), size=lenghts[i])
+            # decide which element to keep between inclass and outclass
+            sub_division = np.random.rand(lenghts[i]) <= ratios[i]
+            sequence = np.empty(inclass.shape, dtype=int)
+            sequence[sub_division] = inclass[sub_division]
+            sequence[np.logical_not(sub_division)] = outclass[np.logical_not(sub_division)]
+            # split into train and test
+            len_train = int(pars.train_len_ratio * lenghts[i])
+            sequence_train += [s for s in sequence[:len_train]]
+            sequence_test += [s for s in sequence[len_train:]]
+            # update change-point list
+            changes.append(len(sequence_test))
+        # remove the last (which is not used)
+        changes.pop(-1)
+
+        if return_indices:
+            return sequence_train, sequence_test, changes
         else:
-            cusum.fit(x=x_train, beta=pars.beta, estimate_threshold=False,
-                      gamma_type='quantile')
-            cusum.threshold = threshold
-        return cusum
+            g_train = dataset.get_graphs(sequence_train, format=['cdg'])[0]
+            g_test = dataset.get_graphs(sequence_test, format=['cdg'])[0]
+            return g_train, g_test, changes
+
+    def process_results(self, figures_merit='discr'):
+        """
+        Process the outcomes for synthetic results.
+        :param figures_merit: list of figures of merit to be printed
+        """
+
+        super().process_results(figures_merit=figures_merit)
+
+        printout = ''
+        result = {}
+        ff = '{0:.3f}' # float string format
+
+        no_changes_sim = len(self.changes_true[0])
+        no_changes_tot = no_changes_sim * self.no_simulations
+        ch_true_mat = np.array(self.changes_true)
+        # ch_est_mat = np.zeros(ch_true_mat.shape)
+
+        # ------------------------------ #
+        # Adjusted Rand index
+        # ------------------------------ #
+        ari = []
+        for n in range(self.no_simulations):
+            # ground-truth label of each data point
+            label_true = np.zeros((self.pars.test_len_t))
+            for i in range(no_changes_sim-1):
+                label_true[self.changes_true[n][i]: self.changes_true[n][i+1]] = i + 1
+            if no_changes_sim >= 1:
+                label_true[:self.changes_true[n][-1]:] = no_changes_sim
+
+            # predicted label of each data point
+            label_pred = np.zeros((self.pars.test_len_t))
+            for i in range(len(self.changes_est[n])-1):
+                label_pred[self.changes_est[n][i]: self.changes_est[n][i+1]] = i + 1
+            if len(self.changes_est[n]) >= 1:
+                label_pred[:self.changes_est[n][-1]:] = len(self.changes_est[n])
+
+            # Compute the ARI
+            ari.append(sklearn.metrics.adjusted_rand_score(label_true, label_pred))
+
+        # ------------------------------ #
+        # Discrepancy
+        # ------------------------------ #
+        discr = []
+        for i in range(self.no_simulations):
+            if no_changes_sim < 1:
+                for ch in self.changes_est[i]:
+                    discr.append(min([ch, self.pars.test_len_t - ch]))
+            else:
+                for ch in self.changes_est[i]:
+                    discr.append( min(np.fabs(ch - ch_true_mat[i, :])) )
+
+        # discrepancy normalized on the length of the sequence
+        discrn = [1.*d/self.pars.test_len_t for d in discr]
+
+        if len(discr) == 0:
+            # This issue occurs when no true change is present and 
+            # no change is detected as well. 
+            # todo Check for better solutions
+            discr = [np.nan]
+            discrn = [np.nan]
 
 
-class SimulationDifference(SimulationOnline):
-    """ 
-    Adopts one of the the cdg.changedetection.cusum.DifferenceCusum as change detection test (CDT).
-    The specific method is selected in one of its subclasses.
-    """
-    _cusum_difference = cdg.changedetection.cusum.DifferenceCusum
+        # ------------------------------ #
+        # False positive rate and true positive rate
+        # ------------------------------ #
 
-    @classmethod
-    def training_part(cls, x_train, pars, threshold=None):
-        # Train the cusum
-        if pars.window_size != 1:
-            raise cdg.util.errors.CDGError(
-                "window size must be 1, but %d was given" % pars.window_size)
-        cusum = cls._cusum_difference(arl=pars.arl_w())
-        cusum.fit(x=x_train, beta=pars.beta, estimate_threshold=True)
-        return cusum
+        fp_list = np.full(self.no_simulations, np.nan)   # number of discovered false positive
+        tp_list = np.full(self.no_simulations, np.nan)   # number of discovered true positive
+        for i in range(self.no_simulations):
+            fp_list[i] = max([0., len(self.changes_est[i]) - no_changes_sim])
+            tp_list[i] = min([len(self.changes_est[i]), no_changes_sim])
 
 
-class SimulationGreater(SimulationDifference):
-    _cusum_difference = cdg.changedetection.cusum.GreaterCusum
+        # ------------------------------ #
+        # Compute estimates and confidence intervals
+        # ------------------------------ #
+
+        prc_list = [2.5, 5, 25, 50, 75, 95, 97.5]
+
+        # Continuous statistics
+        tmp = {}
+        for el in ['discr', 'discrn', 'ari']:
+            exec("tmp[0] = {}".format(el))
+            result[el] = ff.format(np.mean(tmp[0]))
+            result[el + '_std'] = ff.format(np.std(tmp[0]))
+            for pp in prc_list:
+                result['{}_{:03d}'.format(el, round(pp*10))] = ff.format(scipy.percentile(tmp[0], pp))
+
+        # Discrete statistics
+        if no_changes_sim == 0:
+            assert np.all(tp_list == 0.)
+        elif no_changes_sim == 1:
+            assert np.all(tp_list >= 0.) and np.all(tp_list <= 1.)
+        result['tpr'] = ff.format(np.mean(tp_list))
+        result['fpr'] = ff.format(np.mean(fp_list))
+        result['tpr_std'] = ff.format(np.std(tp_list))
+        result['fpr_std'] = ff.format(np.std(fp_list))
+        for pp in prc_list:
+            if no_changes_sim == 0:
+                tmp = 0.0
+            elif no_changes_sim == 1:
+                tmp = bernoulli_mean_percentile(tp_list, pp)
+            else:
+                tmp = discrete_mean_percentile(tp_list, pp)
+            result['tpr_{:03d}'.format(round(pp*10))] = ff.format(tmp)
+            tmp = discrete_mean_percentile(fp_list, pp)
+            result['fpr_{:03d}'.format(round(pp*10))] = ff.format(tmp)
+
+        # Some pre-formatted results
+        tmp = {}
+        for el in ['discr', 'discrn', 'ari', 'fpr', 'tpr']:
+            result[el + '_iqr'] = '[{}, {}]'.format(result[el + '_250'], result[el + '_750'])
+            result[el + '_90ci'] = '[{}, {}]'.format(result[el + '_050'], result[el + '_950'])
+            result[el + '_95ci'] = '[{}, {}]'.format(result[el + '_025'], result[el + '_975'])
+
+            printout += el + ' :  mean (std) [i.q. range] = '
+            printout += '{} ({}) {}\n'.format(result[el], result[el + '_std'], result[el + '_iqr'])
+
+            printout += el + ' :  mean (std) [90 conf.int.] = '
+            printout += '{} ({}) {}\n'.format(result[el], result[el + '_std'], result[el + '_90ci'])
+
+            printout += el + ' :  mean (std) [95 conf.int.] = '
+            printout += '{} ({}) {}\n'.format(result[el], result[el + '_std'], result[el + '_95ci'])
 
 
-class SimulationLower(SimulationDifference):
-    _cusum_difference = cdg.changedetection.cusum.LowerCusum
+        # # Latex table entries
 
+        printout += '\n\n'
+        printout += '# # # # # # # # # # # # # # #' + '\n'
+        printout += '# # # Latex table entry # # #' + '\n'
+        printout += '# # # # # # # # # # # # # # #' + '\n'
 
-class SimulationTwoSided(SimulationDifference):
-    _cusum_difference = cdg.changedetection.cusum.TwoSidedCusum
+        closingString = ' \\\\'
+        try:
+            closingString += '\t % %s\n' % self.dataset.notes
+        except:
+            closingString += '\n'
+
+        # # Footer message
+        printout += '\n\nAll went well, apparently.\n\n'
+        return self._figure_merit_list[figures_merit], result, printout
+
+def bernoulli_mean_percentile(x, prc):
+    quantile_order = prc * 0.01
+    if isinstance(x, list):
+        N = len(x)
+    elif isinstance(x, np.ndarray):
+        N = x.shape[0]
+    else:
+        raise NotImplementedError("Array of type {} not handled".format(type(x)))
+    assert np.all(x>=0.0) and np.all(x<=1.0)
+
+    p = np.mean(x)
+    if p == 0.0 or p == 1.0:
+        # ISSUE: for p=0 scipy.binom.ppf return n-1
+        # https://github.com/scipy/scipy/issues/1603
+        # https://github.com/scipy/scipy/issues/5122
+        # This piece of code is a work around
+        return p
+    return scipy.stats.binom.ppf(q=quantile_order, n=N, p=p, loc=0) / N
+
+def discrete_mean_percentile(x, prc):
+    quantile_order = prc * 0.01
+    if isinstance(x, list):
+        N = len(x)
+    elif isinstance(x, np.ndarray):
+        N = x.shape[0]
+    else:
+        raise NotImplementedError("Array of type {} not handled".format(type(x)))
+    x_mu = np.mean(x)
+    x_std = np.std(x)
+    if x_std == 0:
+        return x_mu
+    return scipy.stats.norm.ppf(q=quantile_order, loc=x_mu, scale=x_std/np.sqrt(N))

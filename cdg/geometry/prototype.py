@@ -1,26 +1,8 @@
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-#
-# Description:
-# ---------
-# Some prototype selection algorithms based on a dissimilarity matrix.
-#
-# References:
-# ---------
-#    [1]  Riesen, K. i Bunke, H. (2010). Graph classification and clustering
-#         based on vector space embedding. World Scientific Publishing Co., Inc.
-#
-#
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2018, Daniele Zambon
-# All rights reserved.
-# Licence: BSD-3-Clause
+# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+#
+# Implements some prototype selection algorithms based on a dissimilarity matrix.
 # --------------------------------------------------------------------------------
-# Author: Daniele Zambon
-# Affiliation: Università della Svizzera italiana
-# eMail: daniele.zambon@usi.ch
-# Last Update: 20/01/2018
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
 import numpy as np
 
 def get_kd_dissimilarity_matrix(data):
@@ -89,8 +71,6 @@ def marginal(dissimilarity_matrix):
 
     return marg
 
-
-
 def spanning(dissimilarity_matrix, n_prototypes=3):
     """
     The first prototype is the set median graph, each additional prototype
@@ -136,9 +116,8 @@ def spanning(dissimilarity_matrix, n_prototypes=3):
 
     return prototypes, val_hat
 
-
-
-def MP( dissimilarity_matrix, n_prototypes=3, display_values=False, value_fun="ell-1"):
+# def MP( dissimilarity_matrix, n_prototypes=3, display_values=False, value_fun="ell-1"):
+def matching_pursuit( dissimilarity_matrix, n_prototypes=3, display_values=False, value_fun="ell-1"):
     """
     Similar to the Matching Pursuit.
 
@@ -221,7 +200,6 @@ def MP( dissimilarity_matrix, n_prototypes=3, display_values=False, value_fun="e
 
     return P, val_hat
 
-
 def k_centers(dissimilarity_matrix, n_prototypes=3):
 
     nr, nc = dissimilarity_matrix.shape
@@ -264,7 +242,6 @@ def k_centers(dissimilarity_matrix, n_prototypes=3):
 
         ct += 1
     return prototypes, max(val)
-
 
 def mean(dissimilarity_matrix, power = 2):
 
