@@ -1,7 +1,7 @@
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+# Copyright (c) 2017-2020, Daniele Zambon, All rights reserved.
 #
-# Defines the Euclidea and pseudo-Euclidean geometries.
+# Defines the Euclidean and pseudo-Euclidean geometries.
 # --------------------------------------------------------------------------------
 import numpy as np
 import cdg.utils

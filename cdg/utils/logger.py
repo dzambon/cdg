@@ -1,26 +1,7 @@
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-#
-# Description:
-# ---------
-# Logging tool for cdg
-#
-#
-# --------------------------------------------------------------------------------
-# Copyright (c) 2017-2018, Daniele Zambon
-# All rights reserved.
-# Licence: BSD-3-Clause
-# --------------------------------------------------------------------------------
-# Author: Daniele Zambon
-# Affiliation: Università della Svizzera italiana
-# eMail: daniele.zambon@usi.ch
-# Last Update: 12/04/2018
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 from . import *
 import logging
 import logging.handlers
 from datetime import datetime
-# import cdg.util.serialise
-# import cdg.util.errors
 
 # Defines the levels
 # ------------------

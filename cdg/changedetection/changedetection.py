@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+# Copyright (c) 2017-2020, Daniele Zambon, All rights reserved.
 #
 # Defines the basis structure of the change-detection tests and the 
 # change-point methods

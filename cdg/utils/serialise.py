@@ -1,19 +1,3 @@
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-#
-# Description:
-# ---------
-# Serialization with pickle.
-#
-# --------------------------------------------------------------------------------
-# Copyright (c) 2017-2018, Daniele Zambon
-# All rights reserved.
-# Licence: BSD-3-Clause
-# --------------------------------------------------------------------------------
-# Author: Daniele Zambon
-# Affiliation: Università della Svizzera italiana
-# eMail: daniele.zambon@usi.ch
-# Last Update: 26/10/2018
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 import pickle
 
 

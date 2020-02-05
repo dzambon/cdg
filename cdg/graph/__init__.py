@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+# Copyright (c) 2017-2020, Daniele Zambon, All rights reserved.
 # --------------------------------------------------------------------------------
 from .graph import *
 from .distance import *

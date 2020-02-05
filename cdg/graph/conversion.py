@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+# Copyright (c) 2017-2020, Daniele Zambon, All rights reserved.
 #
 # Conversion between graph formats.
 # --------------------------------------------------------------------------------
@@ -87,6 +87,8 @@ def identity(graphs, directed, label_ndim, **kwargs):
     return graphs
     
 def cdg_to_nx(graphs, directed, label_ndim, **kwargs):
+    import networkx as nx
+    
     with_nf = False if graphs[0].nf is None or graphs[0].nf.shape[1] == 0 else True
     with_ef = False if graphs[0].ef is None or graphs[0].ef.shape[1] == 0 else True
 
@@ -112,7 +114,8 @@ def cdg_to_nx(graphs, directed, label_ndim, **kwargs):
     return graphs_conv
 
 def cdg_to_grakel(graphs, directed, label_ndim, **kwargs):
-
+    import grakel
+    
     has_node_attr = False if graphs[0].nf is None or graphs[0].nf.shape[1] == 0 else True
     has_edge_attr = False if graphs[0].ef is None or graphs[0].ef.shape[2] == 0 else True
 

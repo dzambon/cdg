@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+# Copyright (c) 2017-2020, Daniele Zambon, All rights reserved.
 #
 # Implements (wrappers of) graph kernels.
 # --------------------------------------------------------------------------------
@@ -16,7 +16,10 @@ class GrakelKernel(Kernel):
     '''
 
     name = 'generic_grakel'
-    
+
+    def __init__(self, **kwargs):
+        self._init_kwargs = kwargs  # every argument needed to instantiate the kernel
+        
     def _kernel(self, source, target, symmetric, paired, verbose):
 
         if paired:
@@ -25,6 +28,7 @@ class GrakelKernel(Kernel):
         if verbose:
             self.log.info('Computing kernel {}...'.format(self.name))
 
+        self.re_init() 
         self.gk.fit(source)
 
         self.gk.n_jobs = self.n_jobs
@@ -55,19 +59,13 @@ class GrakelKernel(Kernel):
 class WeisfeilerLehmanKernel(GrakelKernel):
     name = 'weisfeiler_lehman'
 
-    def __init__(self, verbose=True, normalize=False, n_jobs=1):
-        super().__init__()
+    def re_init(self):
         self.gk = GraphKernel(kernel=[{"name": "weisfeiler_lehman", "niter": 5},
-                                      {"name": "subtree_wl"}],
-                              normalize=normalize, verbose=verbose, n_jobs=n_jobs)
-        
+                                      {"name": "subtree_wl"}], **self._init_kwargs)
+
 
 class ShortestPathKernel(GrakelKernel):
     name = 'shortest_path'
 
-    def __init__(self, verbose=True, normalize=False, n_jobs=1):
-        super().__init__()
-        self.gk = GraphKernel(kernel=[{"name": "shortest_path", 'as_attributes': True}],
-                              normalize=normalize, verbose=verbose, n_jobs=n_jobs)
-
-    
+    def re_init(self):
+        self.gk = GraphKernel(kernel=[{"name": "shortest_path", 'as_attributes': True}], **self._init_kwargs)

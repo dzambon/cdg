@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------------
-# Copyright (c) 2017-2019, Daniele Zambon, All rights reserved.
+# Copyright (c) 2017-2020, Daniele Zambon, All rights reserved.
 #
 # Implements functionalities for repeated experiments.
 # --------------------------------------------------------------------------------
@@ -17,10 +17,6 @@ import sklearn.metrics
 import cdg.changedetection
 import cdg.graph
 import cdg.embedding
-
-# def binom_se(p, n):     TODO See bernoulli_mean_percentile
-# def binom_ci95(p, sim): TODO See bernoulli_mean_percentile
-# def binom_iqr(p, sim):  TODO See bernoulli_mean_percentile
 
 def process_run_lengths(runLen, default=-1):
     meanRunLen = []

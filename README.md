@@ -4,7 +4,7 @@
 
 # Change Detection in a sequence of Graphs
 
-This package is the reference code for most of my publications, Please consider citing them.
+This package is the reference code for most of my publications, please consider citing them.
 
 Some are the following
 
@@ -14,9 +14,10 @@ Some are the following
 * [Anomaly and Change Detection in Graph Streams through Constant-Curvature Manifold Embeddings](https://dzambon.github.com/publications/zambon2018anomaly)
 * [Detecting Changes in Sequences of Attributed Graphs](https://dzambon.github.com/publications/zambon2017detecting)
 
+
 ## Tutorial
 
-Please refer to `TUTORIAL.md`.
+Please have a look at this notebook `tutorial.ipynb`.
 
 
 ## The package
@@ -31,9 +32,11 @@ In the package you will find following folders
 
 
 
-## Requirements 
+## Requirements and suggested packages
 
-You may need 
+You may need:
+* `networkx` (available `pip install networkx`)
+* `GraKel` (available [here](https://github.com/ysig/GraKeL))
 * `graph-matching-toolkit` (available [here](https://github.com/dzambon/graph-matching-toolkit)) to compute graph 
 edit distances. A good place to save it is `./graph-matching-toolkit/graph-matching-toolkit.jar`.
 * `graphviz` for visualize graphs.
@@ -56,5 +59,4 @@ Author: [Daniele Zambon](https://dzambon.github.io)
 Affiliation: [Università della Svizzera italiana](https://inf.usi.ch)   
 eMail: `daniele.zambon@usi.ch`   
 Licence: _BSD-3-Clause_   
-Last Update: _November 16, 2019_   
 
