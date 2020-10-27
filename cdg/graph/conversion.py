@@ -5,8 +5,6 @@
 # --------------------------------------------------------------------------------
 from cdg.graph import Graph as cdg_Graph
 
-import networkx as nx
-import grakel
 import numpy as np
 from tqdm import tqdm
 
@@ -19,6 +17,9 @@ def infer_format(graphs):
     :param graphs:
     :return:
     '''
+    import grakel
+    import networkx as nx
+
     if isinstance(graphs[0], cdg_Graph):
         f = 'cdg'
     elif isinstance(graphs[0], nx.Graph):
@@ -45,13 +46,13 @@ def isistance_npy(graphs):
         return False
     else:
         return True
-    
+
 def convert(graphs, format_in, format_out, directed=False, label_ndim=None, **kwargs):
     # if format_in == 'nx':
     #     return Graph.export_to(graphs=graphs, format=format_out, directed=directed, label_ndim=label_ndim)
     # else:
     #     return Graph.import_from(graphs=graphs, format=format_in, directed=directed, label_ndim=label_ndim)
-    
+
     assert format_in in GRAPH_FORMATS_IMPORT, 'format_in={} is not in {}, '.format(format_in, GRAPH_FORMATS_IMPORT)
     assert format_out in GRAPH_FORMATS_EXPORT, 'format_out={} is not in {}, '.format(format_out, GRAPH_FORMATS_EXPORT)
     assert format_in == infer_format(graphs), 'provided graphs are not in format format_in.'
@@ -78,17 +79,17 @@ def convert(graphs, format_in, format_out, directed=False, label_ndim=None, **kw
         conv_fun = gxl_to_nx
     else:
         raise NotImplementedError
-    
+
     if not isinstance(graphs, list):
         graphs = [graphs]
     return conv_fun(graphs, directed=directed, label_ndim=label_ndim, **kwargs)
-   
+
 def identity(graphs, directed, label_ndim, **kwargs):
     return graphs
-    
+
 def cdg_to_nx(graphs, directed, label_ndim, **kwargs):
     import networkx as nx
-    
+
     with_nf = False if graphs[0].nf is None or graphs[0].nf.shape[1] == 0 else True
     with_ef = False if graphs[0].ef is None or graphs[0].ef.shape[1] == 0 else True
 
@@ -115,7 +116,7 @@ def cdg_to_nx(graphs, directed, label_ndim, **kwargs):
 
 def cdg_to_grakel(graphs, directed, label_ndim, **kwargs):
     import grakel
-    
+
     has_node_attr = False if graphs[0].nf is None or graphs[0].nf.shape[1] == 0 else True
     has_edge_attr = False if graphs[0].ef is None or graphs[0].ef.shape[2] == 0 else True
 
@@ -153,24 +154,25 @@ def cdg_to_grakel(graphs, directed, label_ndim, **kwargs):
     # return list(grakel.graph_from_networkx(g_nx, node_labels_tag='vec', edge_labels_tag='vec', as_Graph=True))
 
 def grakel_to_cdg(graphs, directed, label_ndim, **kwargs):
+    import grakel
 
     graphs_conv = []
     for g in graphs:
-        
+
         N = len(g.vertices)
-        
+
         # map grakel vertex id to set {0, 1, ..., N-1}
         vertices_from_zeros = np.array(list(g.vertices)).astype(int)
-        
+
         def v2id(v):
             if isinstance(v, tuple) and len(v) == 2:
                 return (v2id(v[0]), v2id(v[1]))
             else:
                 return np.where(vertices_from_zeros == v)[0][0]
-        
+
         # Adjacency matrix
         A = g.get_adjacency_matrix()
-        
+
         # Feature matrices from grakel labels
         def grakel_get_features(N, entities, labels, **kwargs):
             '''
@@ -190,7 +192,7 @@ def grakel_to_cdg(graphs, directed, label_ndim, **kwargs):
                 else:
                     raise ValueError('I couldn\'t parse label {}'.format(lab))
                 F_current = lab.shape[0]
-                
+
                 # Define the feature mat at first iteration
                 if F is None:
                     F = F_current
@@ -198,32 +200,32 @@ def grakel_to_cdg(graphs, directed, label_ndim, **kwargs):
                         features = np.zeros((N, N, F))
                     else:  # is node
                         features = np.zeros((N, F))
-                
+
                 assert F == F_current
-                
+
                 # Store label
                 features[v2id(e)] = lab
             return features
-        
+
         # Parse node labels
         if g.node_labels is None:
             X = None
         else:
             X = grakel_get_features(N, g.vertices, g.node_labels)
-        
+
         # Parse edge labels
         if g.edge_labels is None:
             E = None
         else:
             edges = [ed[0] for ed in g.get_edges(purpose='dictionary')]
             E = grakel_get_features(N, edges, g.edge_labels)
-        
+
         graphs_conv.append(cdg_Graph(A, X, E))
     return graphs_conv
 
 def gxl_to_nx(graphs, directed, label_ndim, **kwargs):
     verbose = kwargs.pop('verbose', False)
-    
+
     import subprocess
     import tempfile
     import networkx.drawing.nx_pydot
@@ -244,25 +246,25 @@ def gxl_to_nx(graphs, directed, label_ndim, **kwargs):
 
 def nx_to_npy(graphs, directed, label_ndim, **kwargs):
     import spektral.utils
-    
+
     nf_keys = kwargs.pop('nf_keys')
     ef_keys = kwargs.pop('ef_keys')
     nf_preprocessing = kwargs.pop('nf_preprocessing')
     ef_preprocessing = kwargs.pop('ef_preprocessing')
     nf_postprocessing = kwargs.pop('nf_postprocessing')
     ef_postprocessing = kwargs.pop('ef_postprocessing')
-    
+
 
     for g_nx in graphs:
         for v in g_nx.nodes:
             for i in range(len(nf_keys)):
                 g_nx.node[v][nf_keys[i]] = nf_preprocessing[i](g_nx.node[v][nf_keys[i]])
-        
+
         for e in g_nx.edges:
             for i in range(len(nf_keys)):
                 g_nx.get_edge_data(e[0], e[1])[0][ef_keys[i]] = ef_preprocessing[i] \
                     (g_nx.get_edge_data(e[0], e[1])[0][ef_keys[i]])
-    
+
     A, X, E = spektral.utils.nx_to_numpy(graphs, nf_keys=nf_keys, ef_keys=ef_keys, auto_pad=True,
                                       nf_postprocessing=nf_postprocessing, ef_postprocessing=ef_postprocessing)
     return A, X, E
@@ -284,5 +286,3 @@ def gxl_to_npy(graphs, directed, label_ndim, **kwargs):
 def gxl_to_cdg(graphs, directed, label_ndim, **kwargs):
     g_nx = gxl_to_nx(graphs, directed=directed, label_ndim=label_ndim, **kwargs)
     return nx_to_cdg(g_nx, directed=directed, label_ndim=label_ndim, **kwargs)
-
-

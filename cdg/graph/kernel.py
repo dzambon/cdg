@@ -3,7 +3,6 @@
 #
 # Implements (wrappers of) graph kernels.
 # --------------------------------------------------------------------------------
-from grakel import GraphKernel
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from cdg.graph import *
@@ -60,6 +59,7 @@ class WeisfeilerLehmanKernel(GrakelKernel):
     name = 'weisfeiler_lehman'
 
     def re_init(self):
+        from grakel import GraphKernel
         self.gk = GraphKernel(kernel=[{"name": "weisfeiler_lehman", "niter": 5},
                                       {"name": "subtree_wl"}], **self._init_kwargs)
 
@@ -68,4 +68,5 @@ class ShortestPathKernel(GrakelKernel):
     name = 'shortest_path'
 
     def re_init(self):
+        from grakel import GraphKernel
         self.gk = GraphKernel(kernel=[{"name": "shortest_path", 'as_attributes': True}], **self._init_kwargs)
