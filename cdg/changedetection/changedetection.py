@@ -59,6 +59,7 @@ def cusum_alarm_curve(cusum, sequence, y=None, arl=None, **kwargs):
         false_alarms = np.sum(y_pred) - true_alarms
         alarm_curve.append((false_alarms, true_alarms, threshold))
         # max_g = max(g)
+        assert (g<threshold).sum() > 0, "probably g never reached 0."
         max_g = g[g<threshold].max()
         # print(len(np.where(g<threshold)[0]))
         pbar.update()
@@ -224,6 +225,7 @@ class Cusum(ChangeDetectionTest):
     def reset(self, time=0, g=0):
         self.time = time
         self.g = g
+        return self
 
     def iterate(self, datum):
         """
